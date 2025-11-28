@@ -1,0 +1,22 @@
+{
+  "name": "winccoa-vscode-extension",
+  "displayName": "WinCC OA Tools (template)",
+  "publisher": "martin",
+  "version": "0.0.1",
+  "author": "winccoa-tools-pack",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onCommand:martin.showExtensions"
+  ],
+  "main": "dist/extension.js",
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.0",
+    "@types/vscode": "^1.80.0"
+  }
+}

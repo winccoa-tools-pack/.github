@@ -1,0 +1,14 @@
+{
+  "name": "winccoa-action-template",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "author": "winccoa-tools-pack",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc --build",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.0"
+  }
+}
