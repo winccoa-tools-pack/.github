@@ -32,9 +32,7 @@ Special thanks to all our [contributors](https://github.com/orgs/winccoa-tools-p
 
 This project is basically licensed under the **MIT License** - see the [LICENSE](https://github.com/winccoa-tools-pack/.github/blob/main/LICENSE) file for details.
 
-### Third-Party Licenses
-- **AStyle** - Artistic Style code formatter (LGPL)
-- **VS Code API** - Microsoft (MIT)
+It might happens, that the partial repositories contains third party SW which are using other license models.
 
 ---
 
