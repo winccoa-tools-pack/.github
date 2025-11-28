@@ -1,0 +1,25 @@
+name: Validate Issue Template Usage
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  validate_issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check issue body for template fields
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const body = issue.body || '';
+            const hasTemplate = /\*\*Describe the bug\*\*|\*\*Describe the solution you'd like\*\*/i.test(body);
+            if (!hasTemplate) {
+              await github.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: 'Thanks for opening an issue — please use one of our issue templates and fill the fields. See: https://github.com/orgs/winccoa-tools-pack/people'
+              });
+            }

@@ -1,0 +1,44 @@
+name: Security Report
+about: Report a potential security vulnerability. Sensitive details will be handled privately by maintainers.
+title: "Security: [short description]"
+labels: security
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Important:** This form is intended for reporting security vulnerabilities. For private handling, your organization must enable private issue reporting or you may email the maintainer address listed in `SECURITY.md`.
+  - type: input
+    id: summary
+    attributes:
+      label: Short summary
+      description: A brief one-line summary of the issue
+      placeholder: "e.g. Remote command injection in XYZ"
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide clear, minimal steps to reproduce the issue. Include versions and environment details when possible.
+      placeholder: |
+        1. ...
+        2. ...
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Describe the impact and potential severity (e.g., RCE, information disclosure)
+      required: true
+  - type: input
+    id: contact
+    attributes:
+      label: Contact email
+      description: Email address we can use to follow up (optional)
+      placeholder: security@example.com
+      required: false
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Additional information
+      description: Attach logs, test cases, or links to reproduce. Avoid posting sensitive data publicly.
+      required: false

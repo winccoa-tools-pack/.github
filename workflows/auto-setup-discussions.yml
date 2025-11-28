@@ -1,0 +1,72 @@
+name: Auto Setup Discussions
+
+on:
+  workflow_dispatch:
+    inputs:
+      owner:
+        description: 'Target repository owner (optional, defaults to this repo owner)'
+        required: false
+      repo:
+        description: 'Target repository name (optional, defaults to this repo)'
+        required: false
+  repository_dispatch:
+
+permissions:
+  discussions: write
+
+jobs:
+  create-categories:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine target repository
+        id: target
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const inputs = github.context.eventName === 'workflow_dispatch' ? github.context.payload.inputs || {} : github.context.payload.client_payload || {};
+            const owner = inputs.owner || context.repo.owner;
+            const repo = inputs.repo || context.repo.repo;
+            return { owner, repo };
+
+      - name: Create discussion categories
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = JSON.parse(process.env['ACTIONS_RUNTIME_TOKEN'] ? JSON.stringify({}) : JSON.stringify({}));
+            const owner = JSON.parse(process.env['GITHUB_ACTIONS']) ? context.repo.owner : context.repo.owner;
+            // Use values passed from previous step
+            const targetOwner = await github.actions.getWorkflowRun ? context.repo.owner : context.repo.owner;
+            const targetRepo = context.repo.repo;
+            // We can read step outputs via github.context.payload when using repository_dispatch or inputs for workflow_dispatch
+            const payload = github.context.payload || {};
+            const inputs = payload.client_payload || payload.inputs || {};
+            const finalOwner = inputs.owner || context.repo.owner;
+            const finalRepo = inputs.repo || context.repo.repo;
+
+            const categories = [
+              { name: 'Q&A', description: 'Questions and answers', emoji: '💬' },
+              { name: 'Ideas', description: 'Feature proposals and enhancements', emoji: '💡' },
+              { name: 'General', description: 'General discussion and community chat', emoji: '🗣️' },
+              { name: 'Show and Tell', description: 'Demos and examples from the community', emoji: '🎉' }
+            ];
+
+            for (const cat of categories) {
+              try {
+                await github.request('POST /repos/{owner}/{repo}/discussion-categories', {
+                  owner: finalOwner,
+                  repo: finalRepo,
+                  name: cat.name,
+                  description: cat.description,
+                  emoji: cat.emoji
+                });
+              } catch (err) {
+                if (err.status === 422 || (err.status === 400 && err.message && err.message.includes('already exists'))) {
+                  // category already exists, ignore
+                } else {
+                  throw err;
+                }
+              }
+            }
+
+      - name: Done
+        run: echo "Discussion categories created (or already existed)."
