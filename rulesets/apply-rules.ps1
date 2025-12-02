@@ -17,6 +17,22 @@ $EnableRepoAutoMerge = $true
 # Automatically delete head branches on merge
 $DeleteHeadBranchesOnMerge = $true
 
+try {
+  $ref = gh api "/repos/$Owner/$Repo/git/ref/heads/develop" -q .ref 2>$null
+} catch {
+  Write-Host "Remote branch 'develop' not found, creating from 'main'"
+  $mainSha = gh api "/repos/$Owner/$Repo/git/ref/heads/main" -q .object.sha
+  if ($mainSha) {
+    gh api --method POST "/repos/$Owner/$Repo/git/refs" -f "ref=refs/heads/develop" -f "sha=$mainSha" | Out-Null
+    Write-Host "Created 'develop' from main ($mainSha)"
+  } else {
+    Write-Host "Unable to determine main SHA; please create 'develop' branch manually."
+  }
+}
+
+Write-Host "Setting default branch to 'develop' for $Owner/$Repo"
+gh api --method PATCH "/repos/$Owner/$Repo" -f default_branch=develop | Out-Null
+
 foreach ($b in $branches) {
   Write-Host "Applying branch protection for $Owner/$Repo branch $b"
 
@@ -26,7 +42,7 @@ foreach ($b in $branches) {
       strict = $true
       contexts = $requiredContexts
     }
-    enforce_admins = -not $AllowAdminsBypass
+    enforce_admins = [ordered]@{ enabled = -not $AllowAdminsBypass }
     required_pull_request_reviews = [ordered]@{
       dismiss_stale_reviews = $true
       required_approving_review_count = 1
@@ -38,6 +54,7 @@ foreach ($b in $branches) {
 
   $tmp = [System.IO.Path]::GetTempFileName()
   $json = $payload | ConvertTo-Json -Depth 6
+  Write-Host "Payload for branch $b:`n$json"
   Set-Content -Path $tmp -Value $json -Encoding utf8
 
   gh api --method PUT "/repos/$Owner/$Repo/branches/$b/protection" --input $tmp
