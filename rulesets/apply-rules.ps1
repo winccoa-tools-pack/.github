@@ -19,23 +19,43 @@ $DeleteHeadBranchesOnMerge = $true
 
 foreach ($b in $branches) {
   Write-Host "Applying branch protection for $Owner/$Repo branch $b"
-  $enforceAdminsVal = if ($AllowAdminsBypass) { 'false' } else { 'true' }
-  gh api --method PUT "/repos/$Owner/$Repo/branches/$b/protection" `
-    -f "required_status_checks.contexts=$($requiredContexts -join ' ')" `
-    -f "required_status_checks.strict=true" `
-    -f "enforce_admins=$enforceAdminsVal" `
-    -f "required_pull_request_reviews.dismiss_stale_reviews=true" `
-    -f "required_pull_request_reviews.required_approving_review_count=1" `
-    -F "allow_force_pushes=false" `
-    -F "allow_deletions=false"
+
+  # Build strongly-typed JSON payload to avoid form-encoding type coercion issues
+  $payload = [ordered]@{
+    required_status_checks = [ordered]@{
+      strict = $true
+      contexts = $requiredContexts
+    }
+    enforce_admins = -not $AllowAdminsBypass
+    required_pull_request_reviews = [ordered]@{
+      dismiss_stale_reviews = $true
+      required_approving_review_count = 1
+    }
+    restrictions = $null
+    allow_force_pushes = $false
+    allow_deletions = $false
+  }
+
+  $tmp = [System.IO.Path]::GetTempFileName()
+  $json = $payload | ConvertTo-Json -Depth 6
+  Set-Content -Path $tmp -Value $json -Encoding utf8
+
+  gh api --method PUT "/repos/$Owner/$Repo/branches/$b/protection" --input $tmp
+  Remove-Item -Path $tmp -ErrorAction SilentlyContinue
 }
 
 # Ensure the develop branch exists and set it as the default branch before applying protections
-if (-not (git ls-remote --heads "https://github.com/$Owner/$Repo.git" develop)) {
-  Write-Host "Creating remote branch 'develop' from main (if main exists)"
-  # Try to create develop locally and push
-  git init -q temp-repo 2>$null | Out-Null
-  Remove-Item -Recurse -Force temp-repo 2>$null | Out-Null
+try {
+  $ref = gh api "/repos/$Owner/$Repo/git/ref/heads/develop" -q .ref 2>$null
+} catch {
+  Write-Host "Remote branch 'develop' not found, creating from 'main'"
+  $mainSha = gh api "/repos/$Owner/$Repo/git/ref/heads/main" -q .object.sha
+  if ($mainSha) {
+    gh api --method POST "/repos/$Owner/$Repo/git/refs" -f "ref=refs/heads/develop" -f "sha=$mainSha" | Out-Null
+    Write-Host "Created 'develop' from main ($mainSha)"
+  } else {
+    Write-Host "Unable to determine main SHA; please create 'develop' branch manually."
+  }
 }
 
 Write-Host "Setting default branch to 'develop' for $Owner/$Repo"
