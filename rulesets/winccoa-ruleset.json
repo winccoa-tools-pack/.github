@@ -27,5 +27,19 @@
       "type": "prevent_deletions",
       "parameters": { "enabled": true }
     }
+    ,
+    {
+      "type": "allow_auto_merge",
+      "parameters": { "enabled": true }
+    },
+    {
+      "type": "admins_can_bypass",
+      "parameters": { "enabled": true }
+    }
+    ,
+    {
+      "type": "delete_head_branches",
+      "parameters": { "enabled": true }
+    }
   ]
 }
