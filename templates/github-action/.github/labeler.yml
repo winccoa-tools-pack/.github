@@ -1,0 +1,13 @@
+# PR labeler configuration for GitHub Action template
+action:
+  - paths:
+      - 'action.yml'
+      - 'src/**'
+
+ci:
+  - paths:
+      - '.github/workflows/**'
+
+tests:
+  - paths:
+      - 'test/**'
