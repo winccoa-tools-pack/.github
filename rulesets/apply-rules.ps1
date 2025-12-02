@@ -54,7 +54,7 @@ foreach ($b in $branches) {
 
   $tmp = [System.IO.Path]::GetTempFileName()
   $json = $payload | ConvertTo-Json -Depth 6
-  Write-Host "Payload for branch $b:`n$json"
+  Write-Host "Payload for branch $b`n$json"
   Set-Content -Path $tmp -Value $json -Encoding utf8
 
   gh api --method PUT "/repos/$Owner/$Repo/branches/$b/protection" --input $tmp
