@@ -29,17 +29,21 @@ It might happens, that the partial repositories contains third party SW which ar
 
 ## 🎉 Thank You
 
-Thank you for using WinCC OA tools package! We're excited to be part of your development journey.
+Thank you for using WinCC OA tools package!
+We're excited to be part of your development journey.
 
 **Happy Coding! 🚀**
 
 ---
 
-**Quick Links**
+## Quick Links
 
-- [📦 VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=mPokornyETM.wincc-oa-projects)
+- [📦 VS Code Marketplace](https://marketplace.visualstudio.com/search?term=tag%3Awincc-oa&target=VSCode&category=All%20categories&sortBy=Relevance)
+- [SIMATIC WinCC Open Architecture](https://www.siemens.com/global/en/products/automation/industry-software/automation-software/scada/simatic-wincc-oa.html)
+- [SIMATIC WinCC Open Architecture official documentation](https://www.winccoa.com/documentation/WinCCOA/latest/en_US/index.html)
+- [ETM Company](https://www.winccoa.com/company.html)
 
-*Made with ❤️ for and by the WinCC OA community*
+<center>Made with ❤️ for and by the WinCC OA community</center>
 
 ---
 

@@ -17,5 +17,3 @@ Notes
 
 - These checks only add guidance comments; they do not block merges by themselves unless you configure branch protection to require the validation checks as required status checks.
 - To automatically reject issues opened without templates, consider combining the comment workflow with a bot or use GitHub Apps that can close issues automatically.
-
-*** End ***
