@@ -1,9 +1,0 @@
-name: "WinCC OA Action (template)"
-description: "Template for a Node.js GitHub Action that imports core-utils"
-inputs:
-  message:
-    description: 'Message to log (example)'
-    required: false
-runs:
-  using: 'node16'
-  main: 'dist/index.js'
