@@ -67,3 +67,8 @@ Our vision is to make **quality gates invisible yet powerful**: developers focus
 - Runners: `oalint-for-azure`, `oalint-for-jenkins`, `oalint-for-github`, `oalint-for-vscode`  
 - Tools: `oalint-tool-ctrlppcheck`, `oalint-tool-lizard`, `oalint-tool-sonarqube`  
 - Examples: `oalint-examples`  
+
+
+---
+
+<center>Made with ❤️ for and by the WinCC OA community</center>
