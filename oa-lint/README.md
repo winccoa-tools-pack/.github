@@ -1,5 +1,7 @@
 # 🌐 OALint – WinCC OA Linter
 
+![OALint Logo](logo.jfif)
+
 ## 🎯 Purpose
 OALint is the **static code quality gate for WinCC OA projects**.  
 It enforces consistent coding standards, detects issues early, and provides actionable feedback across all environments — from developer workstations to enterprise CI/CD pipelines.
