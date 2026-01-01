@@ -31,20 +31,101 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      # Check out this .github repo at the desired ref to access labels/labels.yml
-      - name: Checkout org .github
+      - name: Checkout org .github (labels source)
         uses: actions/checkout@v4
         with:
           repository: winccoa-tools-pack/.github
           ref: ${{ inputs.ref }}
           path: org-dot-github
 
-      # Apply labels to the target repository using the global YAML
-      - name: Apply global labels to target repository
-        uses: crazy-max/ghaction-github-labeler@v5
-        with:
-          github-token: ${{ secrets.ORG_LABELS_PAT }}
-          yaml-file: org-dot-github/labels/labels.yml
-          repository: ${{ inputs.target-repo }}
-          skip-delete: ${{ !inputs.strict }}
-          dry-run: ${{ inputs.dry-run }}
+      - name: Show plan (dry run)
+        if: ${{ inputs.dry-run }}
+        run: |
+          echo "Dry run enabled. The following labels would be applied to ${{ inputs.target-repo }}:"
+          cat org-dot-github/labels/labels.yml
+
+      - name: Apply labels via GitHub API (Python)
+        if: ${{ !inputs.dry-run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.ORG_LABELS_PAT }}
+          TARGET_REPO: ${{ inputs.target-repo }}
+          STRICT: ${{ inputs.strict }}
+        run: |
+          python3 - << 'PY'
+          import os, sys, json, time
+          import requests
+          try:
+              import yaml
+          except Exception as e:
+              # install PyYAML if missing (hosted runners allow pip)
+              import subprocess
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"])
+              import yaml
+
+          GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+          TARGET_REPO = os.environ["TARGET_REPO"]
+          STRICT = os.environ.get("STRICT","false").lower() == "true"
+
+          headers = {
+              "Authorization": f"Bearer {GITHUB_TOKEN}",
+              "Accept": "application/vnd.github+json"
+          }
+
+          # Load labels from YAML
+          with open("org-dot-github/labels/labels.yml", "r", encoding="utf-8") as f:
+              desired = yaml.safe_load(f) or []
+
+          # Fetch current labels
+          labels_url = f"https://api.github.com/repos/{TARGET_REPO}/labels"
+          current = []
+          page = 1
+          while True:
+              r = requests.get(labels_url, headers=headers, params={"per_page":100, "page":page})
+              r.raise_for_status()
+              batch = r.json()
+              if not batch: break
+              current.extend(batch)
+              page += 1
+
+          current_by_name = {l["name"]: l for l in current}
+          desired_by_name = {l["name"]: l for l in desired}
+
+          # Upsert desired labels
+          for item in desired:
+              name = item["name"]
+              color = item.get("color","ffffff")
+              desc = item.get("description","") or ""
+              if name in current_by_name:
+                  # update
+                  url = f"https://api.github.com/repos/{TARGET_REPO}/labels/{requests.utils.quote(name, safe='')}"
+                  payload = {"name": name, "color": color, "description": desc}
+                  resp = requests.patch(url, headers=headers, json=payload)
+                  if resp.status_code not in (200,):
+                      print(f"Failed to update {name}: {resp.status_code} {resp.text}", file=sys.stderr)
+                      resp.raise_for_status()
+                  else:
+                      print(f"Updated: {name}")
+              else:
+                  # create
+                  payload = {"name": name, "color": color, "description": desc}
+                  resp = requests.post(labels_url, headers=headers, json=payload)
+                  if resp.status_code not in (201,):
+                      print(f"Failed to create {name}: {resp.status_code} {resp.text}", file=sys.stderr)
+                      resp.raise_for_status()
+                  else:
+                      print(f"Created: {name}")
+
+          # Delete labels not in desired (strict mode)
+          if STRICT:
+              extra = [n for n in current_by_name.keys() if n not in desired_by_name]
+              for name in extra:
+                  url = f"https://api.github.com/repos/{TARGET_REPO}/labels/{requests.utils.quote(name, safe='')}"
+                  resp = requests.delete(url, headers=headers)
+                  if resp.status_code not in (204,):
+                      print(f"Failed to delete {name}: {resp.status_code} {resp.text}", file=sys.stderr)
+                      resp.raise_for_status()
+                  else:
+                      print(f"Deleted (strict): {name}")
+
+          print("Done.")
+          PY
