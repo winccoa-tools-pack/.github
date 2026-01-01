@@ -37,17 +37,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: set-ref
+        shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.ref }}" ]; then
-            echo "ref=${{ inputs.ref }}" >> $GITHUB_OUTPUT
+            echo "ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
           else
-            echo "ref=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           fi
 
       - id: set-matrix
+        shell: bash
         run: |
-          repos=$(grep -v '^\s*$' repos.txt | grep -v '^#' | jq -R . | jq -s .)
-          echo "matrix={\"repo\": $repos}" >> $GITHUB_OUTPUT
+          repos=$(grep -v '^\s*$' repos.txt | grep -v '^#' | jq -R . | jq -c -s .)
+          echo "matrix={\"repo\":$repos}" >> "$GITHUB_OUTPUT"
 
   apply:
     needs: plan
@@ -67,6 +69,7 @@ jobs:
         if: ${{ inputs.dry-run }}
         run: |
           echo "Dry run enabled. Would apply labels from labels/labels.yml to: ${{ matrix.repo }}"
+          echo "strict=${{ inputs.strict }}"
           cat org-dot-github/labels/labels.yml
 
       - name: Apply labels via GitHub API (Python)
@@ -77,7 +80,7 @@ jobs:
           STRICT: ${{ inputs.strict }}
         run: |
           python3 - << 'PY'
-          import os, sys, json
+          import os, sys
           import requests
           try:
               import yaml
@@ -95,16 +98,28 @@ jobs:
               "Accept": "application/vnd.github+json"
           }
 
+          def norm_color(c):
+              if c is None: return "ffffff"
+              if isinstance(c, int): return f"{c:06x}"
+              s = str(c).strip().lower()
+              if s.startswith("#"): s = s[1:]
+              s = (s + "000000")[:6]
+              try: int(s, 16)
+              except ValueError: s = "ffffff"
+              return s
+
           with open("org-dot-github/labels/labels.yml", "r", encoding="utf-8") as f:
               desired = yaml.safe_load(f) or []
 
-          labels_url = f"https://api.github.com/repos/{TARGET_REPO}/labels"
+          desired_by_name = {d["name"]: d for d in desired}
+
+          base = f"https://api.github.com/repos/{TARGET_REPO}/labels"
 
           # Current labels
           current = []
           page = 1
           while True:
-              r = requests.get(labels_url, headers=headers, params={"per_page":100, "page":page})
+              r = requests.get(base, headers=headers, params={"per_page":100, "page":page})
               r.raise_for_status()
               batch = r.json()
               if not batch: break
@@ -112,33 +127,47 @@ jobs:
               page += 1
 
           current_by_name = {l["name"]: l for l in current}
-          desired_by_name = {l["name"]: l for l in desired}
+          failures = []
 
-          # Upsert
+          # Upsert desired
           for item in desired:
               name = item["name"]
-              color = item.get("color","ffffff")
-              desc = item.get("description","") or ""
+              color = norm_color(item.get("color"))
+              desc = (item.get("description") or "").strip()
               if name in current_by_name:
-                  url = f"https://api.github.com/repos/{TARGET_REPO}/labels/{requests.utils.quote(name, safe='')}"
+                  url = f"{base}/{requests.utils.quote(name, safe='')}"
                   payload = {"name": name, "color": color, "description": desc}
                   resp = requests.patch(url, headers=headers, json=payload)
-                  resp.raise_for_status()
-                  print(f"Updated: {name}")
+                  if resp.status_code != 200:
+                      failures.append(f"Update {name}: {resp.status_code} {resp.text}")
+                      print(f"Failed to update {name}: {resp.status_code} {resp.text}", file=sys.stderr)
+                  else:
+                      print(f"Updated: {name}")
               else:
                   payload = {"name": name, "color": color, "description": desc}
-                  resp = requests.post(labels_url, headers=headers, json=payload)
-                  resp.raise_for_status()
-                  print(f"Created: {name}")
+                  resp = requests.post(base, headers=headers, json=payload)
+                  if resp.status_code != 201:
+                      failures.append(f"Create {name}: {resp.status_code} {resp.text}")
+                      print(f"Failed to create {name}: {resp.status_code} {resp.text}", file=sys.stderr)
+                  else:
+                      print(f"Created: {name}")
 
-          # Delete (strict)
+          # Strict delete
           if STRICT:
               for name in list(current_by_name.keys()):
                   if name not in desired_by_name:
-                      url = f"https://api.github.com/repos/{TARGET_REPO}/labels/{requests.utils.quote(name, safe='')}"
+                      url = f"{base}/{requests.utils.quote(name, safe='')}"
                       resp = requests.delete(url, headers=headers)
-                      resp.raise_for_status()
-                      print(f"Deleted (strict): {name}")
+                      if resp.status_code != 204:
+                          failures.append(f"Delete {name}: {resp.status_code} {resp.text}")
+                          print(f"Failed to delete {name}: {resp.status_code} {resp.text}", file=sys.stderr)
+                      else:
+                          print(f"Deleted (strict): {name}")
+
+          if failures:
+              print("One or more label operations failed:")
+              for f in failures: print("  -", f)
+              sys.exit(1)
 
           print("Done.")
           PY
