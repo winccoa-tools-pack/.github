@@ -3,6 +3,7 @@
 ![OALint Logo](logo.jfif)
 
 ## 🎯 Purpose
+
 OALint is the **static code quality gate for WinCC OA projects**.  
 It enforces consistent coding standards, detects issues early, and provides actionable feedback across all environments — from developer workstations to enterprise CI/CD pipelines.
 
@@ -12,6 +13,7 @@ Our mission is simple:
 ---
 
 ## 🏗️ Architecture
+
 OALint is designed as a **modular ecosystem**:
 
 - **oalint-npm** → Core NPM package with rules and validators  
@@ -27,6 +29,7 @@ OALint is designed as a **modular ecosystem**:
 ---
 
 ## 🔄 Workflow
+
 1. **Rules defined** in `oalint-npm` (YAML/JSON + TypeScript validators)  
 2. **Runners** import the shared library and execute rules in their environment  
 3. **Violations detected** → reported in:
@@ -39,6 +42,7 @@ OALint is designed as a **modular ecosystem**:
 ---
 
 ## 🛡️ Key Features
+
 - **Consistency**: Same rules enforced across GitHub, Jenkins, Azure, VS Code, and local CLI  
 - **Scalability**: Easy to extend with new runners and tools  
 - **Developer Experience**: Inline feedback in editors and PRs  
@@ -48,6 +52,7 @@ OALint is designed as a **modular ecosystem**:
 ---
 
 ## 🚀 Vision
+
 OALint is more than a linter — it’s a **quality ecosystem**.  
 By combining static analysis, CI/CD integration, SonarQube dashboards, and AI powered recommendations, OALint ensures WinCC OA projects meet the highest standards of reliability and maintainability.
 
@@ -56,6 +61,7 @@ Our vision is to make **quality gates invisible yet powerful**: developers focus
 ---
 
 ## 📌 Next Steps
+
 - Expand rule coverage for WinCC OA projects  
 - Strengthen integrations with SonarQube and MCP  
 - Build community driven rule sets for shared best practices  
@@ -64,12 +70,12 @@ Our vision is to make **quality gates invisible yet powerful**: developers focus
 ---
 
 ## 📎 Links
+
 - Organisation: [winccoa-tools-pack](https://github.com/winccoa-tools-pack)  
 - Core Package: `oalint-npm`  
 - Runners: `oalint-for-azure`, `oalint-for-jenkins`, `oalint-for-github`, `oalint-for-vscode`  
 - Tools: `oalint-tool-ctrlppcheck`, `oalint-tool-lizard`, `oalint-tool-sonarqube`  
 - Examples: `oalint-examples`  
-
 
 ---
 
