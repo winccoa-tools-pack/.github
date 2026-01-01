@@ -1,8 +1,22 @@
 
 # One repository per line (org/repo)
-winccoa-tools-pack/npm-oalint
-winccoa-tools-pack/azure-oalint
-winccoa-tools-pack/jenkins-oalint
-winccoa-tools-pack/github-oalint
-winccoa-tools-pack/vs-code-winccoa-oalint
+#.github
+#npm-winccoa-core
+#vscode-winccoa-ctrllang
+#vscode-winccoa-logviewer
+#vscode-winccoa-tests
+#vscode-winccoa-scriptactions
+#vscode-winccoa-project-admin
+#vscode-winccoa-mcp-server
+#template-vscode-extension
+#vs-code-tools-pack
+#vscode-winccoa-sidepanel
+#githbut-ci-workflow-build-winccoa-docker-image
+#template-npm-shared-library
+#template-github-ci-workflows
+#template-github-action
+demo-repository
+#template-githbut-ci-workflow-build-winccoa-docker-image
 # Add more here…
+# yoy can also us this command to get all repositories
+# gh repo list winccoa-tools-pack --limit 200 --json name --jq '.[].name'
