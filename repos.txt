@@ -1,0 +1,8 @@
+
+# One repository per line (org/repo)
+winccoa-tools-pack/npm-oalint
+winccoa-tools-pack/azure-oalint
+winccoa-tools-pack/jenkins-oalint
+winccoa-tools-pack/github-oalint
+winccoa-tools-pack/vs-code-winccoa-oalint
+# Add more here…

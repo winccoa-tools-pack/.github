@@ -1,0 +1,35 @@
+
+name: Run single-target label sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      target-repo:
+        description: "org/repo to sync"
+        required: true
+        type: string
+      strict:
+        description: "Delete labels not defined"
+        required: false
+        default: false
+        type: boolean
+      dry-run:
+        description: "Preview only"
+        required: false
+        default: false
+        type: boolean
+      ref:
+        description: "Labels source branch (main/develop)"
+        required: false
+        default: main
+        type: string
+
+jobs:
+  call:
+    uses: winccoa-tools-pack/.github/.github/workflows/sync-labels-reusable.yml@main
+    with:
+      target-repo: ${{ inputs.target-repo }}
+      strict: ${{ inputs.strict }}
+      dry-run: ${{ inputs.dry-run }}
+      ref: ${{ inputs.ref }}
+    secrets: inherit

@@ -1,0 +1,50 @@
+
+name: Reusable — Sync labels to a repository
+
+on:
+  workflow_call:
+    inputs:
+      target-repo:
+        description: "Full repo name (e.g., winccoa-tools-pack/npm-oalint)"
+        required: true
+        type: string
+      ref:
+        description: "Branch/tag in .github to read labels from (main or develop)"
+        required: false
+        default: main
+        type: string
+      strict:
+        description: "If true, delete labels not present in labels.yml"
+        required: false
+        default: false
+        type: boolean
+      dry-run:
+        description: "If true, preview changes without applying"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      # Check out this .github repo at the desired ref to access labels/labels.yml
+      - name: Checkout org .github
+        uses: actions/checkout@v4
+        with:
+          repository: winccoa-tools-pack/.github
+          ref: ${{ inputs.ref }}
+          path: org-dot-github
+
+      # Apply labels to the target repository using the global YAML
+      - name: Apply global labels to target repository
+        uses: crazy-max/ghaction-github-labeler@v5
+        with:
+          github-token: ${{ secrets.ORG_LABELS_PAT }}
+          yaml-file: org-dot-github/labels/labels.yml
+          repository: ${{ inputs.target-repo }}
+          skip-delete: ${{ not(inputs.strict) }}
+          dry-run: ${{ inputs.dry-run }}
