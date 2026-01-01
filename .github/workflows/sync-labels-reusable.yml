@@ -46,5 +46,5 @@ jobs:
           github-token: ${{ secrets.ORG_LABELS_PAT }}
           yaml-file: org-dot-github/labels/labels.yml
           repository: ${{ inputs.target-repo }}
-          skip-delete: ${{ not(inputs.strict) }}
+          skip-delete: ${{ !inputs.strict }}
           dry-run: ${{ inputs.dry-run }}

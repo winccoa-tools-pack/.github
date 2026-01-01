@@ -70,7 +70,7 @@ jobs:
           github-token: ${{ secrets.ORG_LABELS_PAT }}
           yaml-file: org-dot-github/labels/labels.yml
           repository: ${{ matrix.repo }}
-          skip-delete: ${{ not(inputs.strict) }}
+          skip-delete: ${{ !inputs.strict }}
           dry-run: ${{ inputs.dry-run }}
 
       # Optional migration step for legacy defaults (uncomment & adjust if needed)
