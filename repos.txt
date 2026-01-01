@@ -1,22 +1,22 @@
 
 # One repository per line (org/repo)
-#winccoa-tools-pack/.github
-#winccoa-tools-pack/npm-winccoa-core
+winccoa-tools-pack/.github
+winccoa-tools-pack/template-vscode-extension
+winccoa-tools-pack/template-npm-shared-library
+winccoa-tools-pack/template-github-ci-workflows
+winccoa-tools-pack/template-github-action
+winccoa-tools-pack/template-githbut-ci-workflow-build-winccoa-docker-image
+winccoa-tools-pack/npm-winccoa-core
+winccoa-tools-pack/vs-code-tools-pack
 #winccoa-tools-pack/vscode-winccoa-ctrllang
 #winccoa-tools-pack/vscode-winccoa-logviewer
 #winccoa-tools-pack/vscode-winccoa-tests
 #winccoa-tools-pack/vscode-winccoa-scriptactions
 #winccoa-tools-pack/vscode-winccoa-project-admin
 #winccoa-tools-pack/vscode-winccoa-mcp-server
-#winccoa-tools-pack/template-vscode-extension
-#winccoa-tools-pack/vs-code-tools-pack
 #winccoa-tools-pack/vscode-winccoa-sidepanel
 #winccoa-tools-pack/githbut-ci-workflow-build-winccoa-docker-image
-#winccoa-tools-pack/template-npm-shared-library
-#winccoa-tools-pack/template-github-ci-workflows
-#winccoa-tools-pack/template-github-action
 winccoa-tools-pack/demo-repository
-#winccoa-tools-pack/template-githbut-ci-workflow-build-winccoa-docker-image
 # Add more here…
 # yoy can also us this command to get all repositories
 # gh repo list winccoa-tools-pack --limit 200 --json name --jq '.[].name'
