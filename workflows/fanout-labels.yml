@@ -1,0 +1,95 @@
+
+name: Fan-out labels to repositories
+
+on:
+  workflow_dispatch:
+    inputs:
+      strict:
+        description: "Delete labels not defined"
+        required: false
+        default: false
+        type: boolean
+      dry-run:
+        description: "Preview only"
+        required: false
+        default: false
+        type: boolean
+      ref:
+        description: "Branch/tag in .github to read labels from"
+        required: false
+        default: main
+        type: string
+
+  push:
+    branches: [ develop, main ]
+    paths: [ "labels/labels.yml", "repos.txt" ]
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      labels-ref: ${{ steps.set-ref.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: set-ref
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.ref }}" ]; then
+            echo "ref=${{ inputs.ref }}" >> $GITHUB_OUTPUT
+          else
+            # Use the branch that triggered the push (develop/main)
+            echo "ref=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - id: set-matrix
+        run: |
+          repos=$(grep -v '^\s*$' repos.txt | grep -v '^#' | jq -R . | jq -s .)
+          echo "matrix={\"repo\": $repos}" >> $GITHUB_OUTPUT
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout org .github (labels source)
+        uses: actions/checkout@v4
+        with:
+          repository: winccoa-tools-pack/.github
+          ref: ${{ needs.plan.outputs.labels-ref }}
+          path: org-dot-github
+
+      - name: Sync labels to ${{ matrix.repo }}
+        uses: crazy-max/ghaction-github-labeler@v5
+        with:
+          github-token: ${{ secrets.ORG_LABELS_PAT }}
+          yaml-file: org-dot-github/labels/labels.yml
+          repository: ${{ matrix.repo }}
+          skip-delete: ${{ not(inputs.strict) }}
+          dry-run: ${{ inputs.dry-run }}
+
+      # Optional migration step for legacy defaults (uncomment & adjust if needed)
+      # - name: Migrate default GitHub labels (optional)
+      #   uses: actions/github-script@v7
+      #   with:
+      #     github-token: ${{ secrets.ORG_LABELS_PAT }}
+      #     script: |
+      #       const repoFull = "${{ matrix.repo }}";
+      #       const [owner, repo] = repoFull.split("/");
+      #       const { getOctokit } = require('@actions/github');
+      #       const octokit = getOctokit(process.env.GITHUB_TOKEN);
+      #       async function renameLabel(from, to) {
+      #         try {
+      #           await octokit.request('PATCH /repos/{owner}/{repo}/labels/{name}', { owner, repo, name: from, new_name: to });
+      #           console.log(`Renamed ${from} -> ${to}`);
+      #         } catch (e) {
+      #           console.log(`Skip rename ${from}: ${e.message}`);
+      #         }
+      #       }
+      #       await renameLabel('help wanted', 'help-wanted');
+      #       await renameLabel('good first issue', 'good-first-issue');
