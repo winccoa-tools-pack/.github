@@ -69,21 +69,23 @@ jobs:
       BRANCH_PREFIX: ${{ inputs.branch_prefix }}
 
     steps:
-      # Checkout the caller (child) repo
-      - name: Checkout caller repo
+      # 1) Checkout child repo into ./target
+      - name: Checkout child repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          path: target
 
-      # Checkout the template repo side-by-side
+      # 2) Checkout template repo into ./template
       - name: Checkout template repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.TEMPLATE_REPO }}
-          ref:        ${{ env.TEMPLATE_REF }}
+          repository: ${{ inputs.template_repo }}
+          ref:        ${{ inputs.template_ref }}
           path:       template
 
-      - name: Prepare sync set
+      # 3) Copy only the files you manage (example for issue templates)
+      - name: Sync files from template to child
         shell: bash
         run: |
           set -euo pipefail
@@ -124,13 +126,9 @@ jobs:
       - name: Open or update PR
         uses: peter-evans/create-pull-request@v8
         with:
-          token:   ${{ secrets.token || github.token }}
-          # Optionally add-paths to limit committed files. If omitted, it commits all changes.
-          # add-paths: |
-          #   .github/ISSUE_TEMPLATE/**/*.yml
-          commit-message: ${{ inputs.pr_title }}
+          path:   target                                # <— critical
           branch: ${{ inputs.branch_prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
-          base:   ${{ github.event.repository.default_branch }}   # e.g. main/develop
+          base:   ${{ github.event.repository.default_branch }} # e.g. main or develop
           title:  ${{ inputs.pr_title }}
           body:   ${{ inputs.pr_body }}
           labels: ${{ inputs.pr_labels }}
