@@ -121,37 +121,20 @@ jobs:
             rsync -a sync_stage/ ./
           fi
 
-      - name: Commit and push (if changed)
-        id: commit
-        run: |
-          set -e
-          branch="${BRANCH_PREFIX}-${{ github.run_id }}-${{ github.run_attempt }}"
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch" || git checkout "$branch"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git commit -m "${{ inputs.pr_title }}"
-          # Prefer a PAT if provided, otherwise use GITHUB_TOKEN from caller
-          if [[ -n "${{ secrets.token }}" ]]; then
-            git push -u "https://x-access-token:${{ secrets.token }}@github.com/${{ github.repository }}" "$branch"
-          else
-            git push -u origin "$branch"
-          fi
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
-          echo "changed=true"  >> "$GITHUB_OUTPUT"
-
       - name: Open or update PR
-        if: steps.commit.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
           token:   ${{ secrets.token || github.token }}
-          title:   ${{ inputs.pr_title }}
-          body:    ${{ inputs.pr_body }}
-          labels:  ${{ inputs.pr_labels }}
+          # Optionally add-paths to limit committed files. If omitted, it commits all changes.
+          # add-paths: |
+          #   .github/ISSUE_TEMPLATE/**/*.yml
+          commit-message: ${{ inputs.pr_title }}
+          branch: ${{ inputs.branch_prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
+          base:   ${{ github.event.repository.default_branch }}   # e.g. main/develop
+          title:  ${{ inputs.pr_title }}
+          body:   ${{ inputs.pr_body }}
+          labels: ${{ inputs.pr_labels }}
           reviewers: ${{ inputs.pr_reviewers }}
-          branch:  ${{ steps.commit.outputs.branch }}
-          draft:   false
+          draft:  false
+
+
