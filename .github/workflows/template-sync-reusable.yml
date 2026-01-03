@@ -1,4 +1,6 @@
+
 name: Reusable - Sync from template repo and open PR
+
 on:
   workflow_call:
     inputs:
@@ -57,8 +59,8 @@ on:
 jobs:
   sync:
     permissions:
-      contents: write        # push branch
-      pull-requests: write   # open/update PR
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
 
     env:
@@ -69,29 +71,28 @@ jobs:
       BRANCH_PREFIX: ${{ inputs.branch_prefix }}
 
     steps:
-      # 1) Checkout child repo into ./target
-      - name: Checkout child repo
+      - name: Checkout caller repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          path: target
 
-      # 2) Checkout template repo into ./template
       - name: Checkout template repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.template_repo }}
-          ref:        ${{ inputs.template_ref }}
+          repository: ${{ env.TEMPLATE_REPO }}
+          ref:        ${{ env.TEMPLATE_REF }}
           path:       template
 
-      # 3) Copy only the files you manage (example for issue templates)
-      - name: Sync files from template to child
+      - name: Prepare sync set
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob dotglob
+          shopt -s nullglob dotglob globstar
+
           : > globs.txt
           printf "%s\n" "${PATHS}" >> globs.txt
+          # normalize CRLF just in case
+          tr -d '\r' < globs.txt > globs.clean && mv globs.clean globs.txt
 
           mkdir -p sync_stage
           while IFS= read -r GLOB || [[ -n "$GLOB" ]]; do
@@ -104,35 +105,29 @@ jobs:
             done
           done < globs.txt
 
+          if ! compgen -G "sync_stage/**" > /dev/null; then
+            echo "::warning::No files matched the provided globs from template repo"
+          fi
+
       - name: Apply sync (update or mirror)
         shell: bash
         run: |
           set -euo pipefail
           if [[ "${SYNC_MODE}" == "mirror" ]]; then
-            # Mirror the selected subtrees exactly (delete extras)
-            # Derive unique top-level subtrees from the globs
-            awk '!/^#|^$/{print $0}' globs.txt \
-              | sed -E 's#/[^/]+$##' | sed -E 's#/\*\*.*$##' \
-              | sort -u | while read -r top; do
-                  [[ -z "$top" ]] && continue
-                  mkdir -p "$top"
-                  rsync -a --delete "sync_stage/$top/" "$top/"
-                done
+            rsync -a --delete "sync_stage/" "./"
           else
-            # Update only: copy files over, keep extras
-            rsync -a sync_stage/ ./
+            rsync -a "sync_stage/" "./"
           fi
 
       - name: Open or update PR
         uses: peter-evans/create-pull-request@v8
         with:
-          path:   target                                # <— critical
+          token:   ${{ secrets.token || github.token }}
+          commit-message: ${{ inputs.pr_title }}
           branch: ${{ inputs.branch_prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
-          base:   ${{ github.event.repository.default_branch }} # e.g. main or develop
+          base:   ${{ github.event.repository.default_branch }}
           title:  ${{ inputs.pr_title }}
           body:   ${{ inputs.pr_body }}
           labels: ${{ inputs.pr_labels }}
           reviewers: ${{ inputs.pr_reviewers }}
           draft:  false
-
-
