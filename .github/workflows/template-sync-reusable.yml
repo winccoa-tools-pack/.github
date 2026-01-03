@@ -119,6 +119,12 @@ jobs:
             rsync -a "sync_stage/" "./"
           fi
 
+      # 👇 Remove temporary files so the PR contains only the copied results
+      - name: Remove template & staging artifacts
+        shell: bash
+        run: |
+          rm -rf template sync_stage globs.txt
+
       - name: Open or update PR
         uses: peter-evans/create-pull-request@v8
         with:
