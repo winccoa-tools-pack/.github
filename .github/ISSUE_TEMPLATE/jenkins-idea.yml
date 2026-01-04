@@ -1,0 +1,41 @@
+name: "🔧 Jenkins Idea / Enhancement"
+description: Propose a Jenkins plugin feature, shared library step, or CI/CD integration
+labels: ["triage", "jenkins", "ci-cd"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please review the triage process:
+        https://github.com/winccoa-tools-pack/.github/blob/main/docs/triage-guide.md
+
+  - type: input
+    id: title
+    attributes:
+      label: Short title
+      placeholder: "Example: WinCC OA TestFramework Jenkins Plugin"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      placeholder: "Describe the CI/CD gap or missing automation..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Jenkins functionality
+      placeholder: |
+        Describe the idea:
+        - Plugin feature?
+        - Shared library step?
+        - Pipeline integration?
+    validations:
+      required: true
+
+---
+
+<center>Made with ❤️ for and by the WinCC OA community</center>
