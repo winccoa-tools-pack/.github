@@ -1,0 +1,39 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 💬 General Discussion / Questions
+    url: https://github.com/winccoa-tools-pack/.github/discussions
+    about: Start a discussion for questions, brainstorming, or open conversation.
+
+issue_templates:
+  - name: 💡 VS Code Extension Idea
+    description: Propose a new VS Code extension for the WinCC OA ecosystem
+    file: vs-code-extension-idea.yml
+
+  - name: ⚙️ GitHub Actions / CI-CD Enhancement
+    description: Suggest improvements or new automation workflows
+    file: github-actions-ci-cd.yml
+
+  - name: 🧪 WinCC OA Testing Feature
+    description: Propose enhancements for testing, TestFramework, or validation
+    file: wincc-oa-testing.yml
+
+  - name: 🤖 WinCC OA AI Feature
+    description: Suggest AI-powered enhancements for WinCC OA development
+    file: wincc-oa-ai.yml
+
+  - name: 🔌 WinCC OA Integration / Sub-Project Proposal
+    description: Propose a new integration, module, or sub-project
+    file: wincc-oa-integration.yml
+
+  - name: 🔧 Jenkins Idea / Enhancement
+    description: Propose a Jenkins plugin feature, shared library step, or CI/CD integration
+    file: jenkins-idea.yml
+
+  - name: 📘 Documentation Request / Proposal
+    description: Suggest improvements or additions to documentation
+    file: documentation-request.yml
+
+  - name: ✨ Idea / Vision
+    description: Share any idea, vision, or concept for the ecosystem
+    file: idea.yml
