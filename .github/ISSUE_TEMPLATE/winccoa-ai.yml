@@ -1,0 +1,37 @@
+name: "🤖 WinCC OA AI Feature"
+description: Suggest AI-powered enhancements for WinCC OA development
+labels: ["triage", "ai", "wincc-oa"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please review the triage process:
+        https://github.com/winccoa-tools-pack/.github/blob/main/docs/triage-guide.md
+
+  - type: input
+    id: title
+    attributes:
+      label: Short title
+      placeholder: "Example: AI-assisted CTRL code generation"
+    validations:
+      required: true
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: AI use case
+      placeholder: "Describe the workflow AI should improve..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed AI functionality
+      placeholder: "Describe the model interaction, MCP server usage, context..."
+    validations:
+      required: true
+
+---
+
+<center>Made with ❤️ for and by the WinCC OA community</center>
