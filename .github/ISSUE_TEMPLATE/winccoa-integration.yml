@@ -1,0 +1,37 @@
+name: "🔌 WinCC OA Integration / Sub-Project Proposal"
+description: Propose a new integration, module, or sub-project
+labels: ["triage", "integration", "sub-project"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please review the triage process:
+        https://github.com/winccoa-tools-pack/.github/blob/main/docs/triage-guide.md
+
+  - type: input
+    id: title
+    attributes:
+      label: Integration name
+      placeholder: "Example: WinCC OA → Azure Monitor integration"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      placeholder: "Why is this integration needed?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      placeholder: "Describe endpoints, workflows, data flows..."
+    validations:
+      required: true
+
+---
+
+<center>Made with ❤️ for and by the WinCC OA community</center>
