@@ -1,0 +1,37 @@
+name: "📘 Documentation Request / Proposal"
+description: Suggest improvements or additions to documentation
+labels: ["triage", "documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please review the triage process:
+        https://github.com/winccoa-tools-pack/.github/blob/main/docs/triage-guide.md
+
+  - type: input
+    id: title
+    attributes:
+      label: Documentation topic
+      placeholder: "Example: Jenkins Shared Library Quick Start"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What is missing or unclear?
+      placeholder: "Describe the documentation gap..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed documentation content
+      placeholder: "Describe what should be added..."
+    validations:
+      required: true
+
+---
+
+<center>Made with ❤️ for and by the WinCC OA community</center>
