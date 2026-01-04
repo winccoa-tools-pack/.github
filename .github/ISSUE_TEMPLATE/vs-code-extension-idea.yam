@@ -1,0 +1,40 @@
+name: "💡 VS Code Extension Idea"
+description: Propose a new VS Code extension for the WinCC OA ecosystem
+labels: ["triage", "vscode-extension", "idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please review the triage process:
+        https://github.com/winccoa-tools-pack/.github/blob/main/docs/triage-guide.md
+
+  - type: input
+    id: title
+    attributes:
+      label: Short title
+      placeholder: "Example: CTRL Debugger for WinCC OA"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this extension solve?
+      placeholder: "Describe the pain point or missing capability..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed functionality
+      placeholder: "Describe the extension, commands, UI, workflows..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+      placeholder: "Links, screenshots, related tools..."
+      required: false

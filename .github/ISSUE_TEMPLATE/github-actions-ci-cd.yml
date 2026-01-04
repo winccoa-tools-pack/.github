@@ -1,0 +1,33 @@
+name: "⚙️ GitHub Actions / CI-CD Enhancement"
+description: Suggest improvements or new automation workflows
+labels: ["triage", "ci-cd", "github-actions"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please review the triage process:
+        https://github.com/winccoa-tools-pack/.github/blob/main/docs/triage-guide.md
+
+  - type: input
+    id: title
+    attributes:
+      label: Short title
+      placeholder: "Example: WinCC OA TestFramework GitHub Action"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What CI/CD gap does this address?
+      placeholder: "Describe the missing automation or inefficiency..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed workflow or action
+      placeholder: "Describe the steps, triggers, inputs, outputs..."
+    validations:
+      required: true

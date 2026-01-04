@@ -1,0 +1,29 @@
+name: "✨ Idea / Vision"
+description: Share any idea, vision, or concept for the ecosystem
+labels: ["triage", "idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please review the triage process:
+        https://github.com/winccoa-tools-pack/.github/blob/main/docs/triage-guide.md
+
+  - type: input
+    id: title
+    attributes:
+      label: Idea title
+      placeholder: "Short descriptive title"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe your idea
+      placeholder: "Write freely. Anything goes — concepts, visions, sketches..."
+    validations:
+      required: true
+
+---
+
+<center>Made with ❤️ for and by the WinCC OA community</center>
