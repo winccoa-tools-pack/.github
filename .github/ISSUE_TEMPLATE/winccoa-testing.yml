@@ -1,0 +1,33 @@
+name: "🧪 WinCC OA Testing Feature"
+description: Propose enhancements for testing, TestFramework, or validation
+labels: ["triage", "testing", "wincc-oa"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please review the triage process:
+        https://github.com/winccoa-tools-pack/.github/blob/main/docs/triage-guide.md
+
+  - type: input
+    id: title
+    attributes:
+      label: Short title
+      placeholder: "Example: Test Explorer integration"
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Testing scenario
+      placeholder: "Describe the testing workflow or challenge..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      placeholder: "Describe the feature, UI, automation, or integration..."
+    validations:
+      required: true
