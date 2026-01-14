@@ -1,0 +1,224 @@
+name: Versioning / Tags / Changelog (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "prerelease or release"
+        required: true
+        type: string
+      target_branch:
+        description: "Optional: branch name for validation (e.g. release/v1.2.3)"
+        required: false
+        type: string
+      validate_release_branch:
+        description: "If true: require target_branch to be release/vX.Y.Z and match the computed version"
+        required: false
+        default: false
+        type: boolean
+      version_file:
+        description: "File that contains the base version (default: package.json)"
+        required: false
+        default: "package.json"
+        type: string
+      version_key:
+        description: "For JSON files: key holding the version (default: version)"
+        required: false
+        default: "version"
+        type: string
+      version_regex:
+        description: "For non-JSON files: regex with one capturing group for version"
+        required: false
+        default: ""
+        type: string
+      tag_prefix:
+        description: "Tag prefix (default: v)"
+        required: false
+        default: "v"
+        type: string
+      create_tag:
+        description: "If true: create (and optionally push) the computed tag"
+        required: false
+        default: true
+        type: boolean
+      push_tag:
+        description: "If true: push the created tag to origin"
+        required: false
+        default: true
+        type: boolean
+      force_push_tag:
+        description: "If true: force-push the tag if it already exists remotely"
+        required: false
+        default: false
+        type: boolean
+      changelog_max_commits:
+        description: "When no baseline tag exists, include this many commits"
+        required: false
+        default: 20
+        type: number
+    outputs:
+      version:
+        description: "Computed base version (x.y.z)"
+        value: ${{ jobs.versioning.outputs.version }}
+      tag:
+        description: "Computed tag (e.g. v1.2.3 or v1.2.3-a1b2c3d)"
+        value: ${{ jobs.versioning.outputs.tag }}
+      changelog:
+        description: "Generated changelog markdown"
+        value: ${{ jobs.versioning.outputs.changelog }}
+
+permissions:
+  contents: write
+
+jobs:
+  versioning:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate inputs
+        shell: bash
+        run: |
+          MODE="${{ inputs.mode }}"
+          if [ "$MODE" != "prerelease" ] && [ "$MODE" != "release" ]; then
+            echo "❌ ERROR: inputs.mode must be 'prerelease' or 'release' (got: $MODE)"
+            exit 1
+          fi
+
+          if [ "${{ inputs.validate_release_branch }}" = "true" ] && [ -z "${{ inputs.target_branch }}" ]; then
+            echo "❌ ERROR: inputs.target_branch is required when validate_release_branch=true"
+            exit 1
+          fi
+
+      - name: Compute version + tag
+        id: meta
+        shell: bash
+        run: |
+          VERSION_FILE="${{ inputs.version_file }}"
+          VERSION_KEY="${{ inputs.version_key }}"
+          VERSION_REGEX="${{ inputs.version_regex }}"
+          MODE="${{ inputs.mode }}"
+          TAG_PREFIX="${{ inputs.tag_prefix }}"
+
+          if [ ! -f "$VERSION_FILE" ]; then
+            echo "❌ ERROR: version_file not found: $VERSION_FILE"
+            exit 1
+          fi
+
+          VERSION=$(python3 -c "import json,os,re,sys; vf=os.environ['VERSION_FILE']; vk=os.environ.get('VERSION_KEY','version'); vr=os.environ.get('VERSION_REGEX',''); content=open(vf,'r',encoding='utf-8').read(); data=(json.loads(content) if vf.endswith('.json') else None); m=(re.search(vr,content,flags=re.MULTILINE) if (data is None and vr) else None); v=(str(data.get(vk,'')).strip() if data is not None else (m.group(1).strip() if m else '')); (print(v) if v else (sys.stderr.write(f'ERROR: Could not extract version from {vf}\\n') or sys.exit(1)))")
+
+          echo "📋 Base version: $VERSION"
+
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "❌ ERROR: version must be x.y.z (got: $VERSION)"
+            exit 1
+          fi
+
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          if [ "$MODE" = "prerelease" ]; then
+            TAG="${TAG_PREFIX}${VERSION}-${SHORT_SHA}"
+          else
+            TAG="${TAG_PREFIX}${VERSION}"
+          fi
+
+          if [ "${{ inputs.validate_release_branch }}" = "true" ]; then
+            BRANCH_NAME="${{ inputs.target_branch }}"
+            if [[ "$BRANCH_NAME" =~ ^release\/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              EXPECTED_VERSION="${BASH_REMATCH[1]}"
+              if [ "$EXPECTED_VERSION" != "$VERSION" ]; then
+                echo "❌ ERROR: Branch $BRANCH_NAME expects version $EXPECTED_VERSION but computed $VERSION"
+                exit 1
+              fi
+            else
+              echo "❌ ERROR: target_branch must match release/vX.Y.Z (got: $BRANCH_NAME)"
+              exit 1
+            fi
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          echo "🏷️ Tag: $TAG"
+        env:
+          VERSION_FILE: ${{ inputs.version_file }}
+          VERSION_KEY: ${{ inputs.version_key }}
+          VERSION_REGEX: ${{ inputs.version_regex }}
+
+      - name: Create tag
+        if: ${{ inputs.create_tag }}
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "⚠️ Tag $TAG already exists locally, deleting it first"
+            git tag -d "$TAG"
+          fi
+
+          git tag "$TAG"
+
+      - name: Push tag
+        if: ${{ inputs.create_tag && inputs.push_tag }}
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            if [ "${{ inputs.force_push_tag }}" = "true" ]; then
+              echo "⚠️ Tag $TAG exists remotely, force pushing"
+              git push --force origin "$TAG"
+            else
+              echo "❌ ERROR: Tag $TAG already exists remotely (set force_push_tag=true to overwrite)"
+              exit 1
+            fi
+          else
+            git push origin "$TAG"
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          MODE="${{ inputs.mode }}"
+          PREFIX="${{ inputs.tag_prefix }}"
+
+          TITLE=""
+          if [ "$MODE" = "prerelease" ]; then
+            TITLE="## 🧪 Pre-Release $TAG"
+          else
+            TITLE="## 🚀 Release $TAG"
+          fi
+
+          echo "$TITLE" > temp_changelog.md
+          echo "" >> temp_changelog.md
+
+          # Prefer last stable semver tag for baseline (ignores prerelease tags like v1.2.3-abc123)
+          BASELINE=$(git describe --tags --abbrev=0 --match "${PREFIX}[0-9]*.[0-9]*.[0-9]*" 2>/dev/null || echo "")
+          if [ -n "$BASELINE" ]; then
+            echo "Changes since $BASELINE:" >> temp_changelog.md
+            echo "" >> temp_changelog.md
+            git log "$BASELINE"..HEAD --pretty=format:"- %s (%h)" --no-merges >> temp_changelog.md
+          else
+            echo "Recent changes:" >> temp_changelog.md
+            echo "" >> temp_changelog.md
+            git log --pretty=format:"- %s (%h)" --no-merges -n "${{ inputs.changelog_max_commits }}" >> temp_changelog.md
+          fi
+
+          {
+            echo "changelog<<EOF"
+            cat temp_changelog.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          rm temp_changelog.md
