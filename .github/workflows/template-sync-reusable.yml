@@ -53,7 +53,7 @@ on:
         type: string
     secrets:
       token:
-        description: "Optional PAT if you prefer over GITHUB_TOKEN"
+        description: "Optional PAT if you prefer over GITHUB_TOKEN (required if syncing .github/workflows/*)"
         required: false
 
 jobs:
@@ -61,6 +61,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write
     runs-on: ubuntu-latest
 
     env:
@@ -124,6 +125,19 @@ jobs:
         shell: bash
         run: |
           rm -rf template sync_stage globs.txt
+
+      - name: Require PAT when changing workflow files
+        shell: bash
+        env:
+          HAS_PAT: ${{ secrets.token != '' }}
+        run: |
+          set -euo pipefail
+          if git status --porcelain | awk '{print $2}' | grep -qE '^\.github/workflows/'; then
+            if [[ "${HAS_PAT}" != "true" ]]; then
+              echo "::error::This sync modifies .github/workflows/*; provide secrets.token (a PAT with workflow permission) because GITHUB_TOKEN cannot create/update workflow files."
+              exit 1
+            fi
+          fi
 
       - name: Open or update PR
         uses: peter-evans/create-pull-request@v8
