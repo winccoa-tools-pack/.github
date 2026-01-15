@@ -218,7 +218,11 @@ jobs:
 
           {
             echo "changelog<<EOF"
-            cat temp_changelog.md
+            if [ -f temp_changelog.md ]; then
+              cat temp_changelog.md
+            else
+              echo "(no changelog generated)"
+            fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
