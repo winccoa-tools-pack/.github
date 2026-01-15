@@ -224,7 +224,8 @@ jobs:
             else
               echo "(no changelog generated)"
             fi
-            echo "$DELIM"
+            # Ensure delimiter is on its own line even if the file has no trailing newline
+            printf '\n%s\n' "$DELIM"
           } >> "$GITHUB_OUTPUT"
 
           rm temp_changelog.md
