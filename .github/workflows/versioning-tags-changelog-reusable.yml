@@ -216,14 +216,15 @@ jobs:
             git log --pretty=format:"- %s (%h)" --no-merges -n "${{ inputs.changelog_max_commits }}" >> temp_changelog.md
           fi
 
+          DELIM="CHANGELOG_$(date +%s%N)"
           {
-            echo "changelog<<EOF"
+            echo "changelog<<$DELIM"
             if [ -f temp_changelog.md ]; then
-              cat temp_changelog.md
+              cat temp_changelog.md || true
             else
               echo "(no changelog generated)"
             fi
-            echo "EOF"
+            echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
 
           rm temp_changelog.md
