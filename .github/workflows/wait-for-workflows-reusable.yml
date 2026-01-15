@@ -1,0 +1,137 @@
+name: Wait for Workflows (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: "Commit SHA to wait for (e.g. PR head SHA)"
+        required: true
+        type: string
+      workflows:
+        description: |
+          Newline-separated list of workflow names/ids/files to wait for.
+          Example:
+            CI/CD Pipeline
+            PR Labels
+        required: true
+        type: string
+      timeout_seconds:
+        description: "Total wait time before failing"
+        required: false
+        default: 1200
+        type: number
+      poll_interval_seconds:
+        description: "Polling interval"
+        required: false
+        default: 10
+        type: number
+
+permissions:
+  actions: read
+
+jobs:
+  wait:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Wait for workflows to succeed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ inputs.sha }}
+          WORKFLOWS: ${{ inputs.workflows }}
+          TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
+          POLL_SECONDS: ${{ inputs.poll_interval_seconds }}
+        run: |
+          set -euo pipefail
+
+          REPO="${GITHUB_REPOSITORY}"
+
+          if [ -z "${SHA}" ]; then
+            echo "::error::inputs.sha is required"
+            exit 1
+          fi
+
+          if [ -z "${WORKFLOWS}" ]; then
+            echo "::error::inputs.workflows is required"
+            exit 1
+          fi
+
+          # normalize CRLF and split into lines
+          WORKFLOWS_CLEAN=$(printf "%s" "$WORKFLOWS" | tr -d '\r')
+
+          echo "Waiting for workflows on SHA: $SHA"
+          echo "Timeout: ${TIMEOUT_SECONDS}s, poll: ${POLL_SECONDS}s"
+
+          # seconds -> iterations
+          if [ "$POLL_SECONDS" -le 0 ]; then
+            echo "::error::poll_interval_seconds must be > 0"
+            exit 1
+          fi
+
+          ITERS=$(( (TIMEOUT_SECONDS + POLL_SECONDS - 1) / POLL_SECONDS ))
+          if [ "$ITERS" -le 0 ]; then
+            ITERS=1
+          fi
+
+          while IFS= read -r WF || [ -n "$WF" ]; do
+            WF=$(echo "$WF" | sed 's/^ *//; s/ *$//')
+            [ -z "$WF" ] && continue
+            case "$WF" in
+              \#*) continue ;;
+            esac
+
+            echo "----"
+            echo "Workflow: $WF"
+
+            for i in $(seq 1 "$ITERS"); do
+              RUN_JSON=$(gh run list --repo "$REPO" --workflow "$WF" --limit 50 \
+                --json databaseId,headSha,status,conclusion,createdAt \
+                --jq "[.[] | select(.headSha == \"$SHA\")] | sort_by(.createdAt) | reverse | .[0]")
+
+              if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "null" ]; then
+                echo "[$i/$ITERS] No matching run yet"
+                sleep "$POLL_SECONDS"
+                continue
+              fi
+
+              STATUS=$(echo "$RUN_JSON" | jq -r '.status')
+              CONCLUSION=$(echo "$RUN_JSON" | jq -r '.conclusion')
+              RUN_ID=$(echo "$RUN_JSON" | jq -r '.databaseId')
+
+              echo "[$i/$ITERS] run=$RUN_ID status=$STATUS conclusion=$CONCLUSION"
+
+              if [ "$STATUS" != "completed" ]; then
+                sleep "$POLL_SECONDS"
+                continue
+              fi
+
+              if [ "$CONCLUSION" = "success" ]; then
+                break
+              fi
+
+              echo "::error::Workflow '$WF' did not succeed (conclusion=$CONCLUSION)"
+              exit 1
+            done
+
+            # if loop ended due to timeout, the last printed state wasn't success
+            # detect by re-checking latest state quickly
+            RUN_JSON=$(gh run list --repo "$REPO" --workflow "$WF" --limit 50 \
+              --json headSha,status,conclusion,createdAt \
+              --jq "[.[] | select(.headSha == \"$SHA\")] | sort_by(.createdAt) | reverse | .[0]")
+
+            if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "null" ]; then
+              echo "::error::Timed out waiting for workflow '$WF' (no run found)"
+              exit 1
+            fi
+
+            STATUS=$(echo "$RUN_JSON" | jq -r '.status')
+            CONCLUSION=$(echo "$RUN_JSON" | jq -r '.conclusion')
+            if [ "$STATUS" != "completed" ] || [ "$CONCLUSION" != "success" ]; then
+              echo "::error::Timed out waiting for workflow '$WF' (status=$STATUS conclusion=$CONCLUSION)"
+              exit 1
+            fi
+
+          done <<< "$WORKFLOWS_CLEAN"
+
+          echo "✅ All required workflows succeeded for $SHA"
