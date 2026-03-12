@@ -1,10 +1,12 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# ⚠️  OBSOLETE – kept only for backward compatibility with existing consumers.
-# New callers should use: reusable-cleanup-prereleases-by-branch.yml
-# This file will be removed after Phase 2 migration is complete.
+# Reusable: Cleanup Prereleases by Branch
+# ──────────────────────────────────────────────────────────────────────────────
+# Renamed copy of cleanup-prereleases-by-branch-reusable.yml with the
+# consistent `reusable-` prefix. The old file is kept for backward
+# compatibility until all consumer repos are migrated (Phase 2).
 # ──────────────────────────────────────────────────────────────────────────────
 
-name: Cleanup Prereleases by Branch (Reusable)
+name: "Reusable: Cleanup Prereleases by Branch"
 
 on:
   workflow_call:
