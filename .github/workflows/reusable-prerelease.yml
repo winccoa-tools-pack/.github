@@ -4,6 +4,11 @@
 # Centralized prerelease workflow for all winccoa-tools-pack repositories.
 # Handles both VS Code extension (VSIX) and npm library (tarball) projects.
 #
+# Secret resolution (handled by GitHub automatically):
+#   1. Repository-level secret  (user-defined per repo — highest priority)
+#   2. Organization-level secret (shared fallback for the whole org)
+#   Callers just use `secrets: inherit` — GitHub resolves the priority.
+#
 # Usage (VS Code extension — caller: pre-release.yml or pre-release-develop.yml):
 #   jobs:
 #     pre-release:
@@ -21,8 +26,7 @@
 #         target_branch: ${{ github.head_ref || github.ref_name }}
 #         project_type: npm
 #         publish_to_npm: false
-#       secrets:
-#         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+#       secrets: inherit
 ##
 
 name: "Reusable: Pre-Release"

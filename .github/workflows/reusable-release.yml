@@ -6,6 +6,11 @@
 #
 # Flow: versioning → precheck (find matching prerelease) → tag → release (download + publish)
 #
+# Secret resolution (handled by GitHub automatically):
+#   1. Repository-level secret  (user-defined per repo — highest priority)
+#   2. Organization-level secret (shared fallback for the whole org)
+#   Callers just use `secrets: inherit` — GitHub resolves the priority.
+#
 # Usage (VS Code extension):
 #   jobs:
 #     release:
@@ -22,8 +27,7 @@
 #       with:
 #         target_branch: main
 #         project_type: npm
-#       secrets:
-#         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+#       secrets: inherit
 ##
 
 name: "Reusable: Release"

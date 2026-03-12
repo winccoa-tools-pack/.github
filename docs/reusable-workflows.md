@@ -5,6 +5,29 @@
 
 ---
 
+## Secret Management
+
+All callers use **`secrets: inherit`**. GitHub resolves secrets with automatic
+priority:
+
+1. **Repository-level secret** — set per repo when a custom token is needed
+2. **Organization-level secret** — shared fallback for the whole org
+
+| Secret | Used by | Purpose |
+|---|---|---|
+| `VSCE_PAT` | `reusable-release.yml` | VS Code Marketplace publish token |
+| `NPM_TOKEN` | `reusable-prerelease.yml`, `reusable-release.yml` | npm registry publish token |
+| `DOCKER_USER` | `reusable-ci-cd.yml` | Docker Hub username (integration tests) |
+| `DOCKER_PASSWORD` | `reusable-ci-cd.yml` | Docker Hub password (integration tests) |
+| `REPO_ADMIN_TOKEN` | `reusable-create-release-branch.yml` | Token to push to protected branches |
+
+> **Setup**: Define `VSCE_PAT` and `NPM_TOKEN` as **org-level secrets** (Settings →
+> Secrets → Actions) so every repo gets them automatically. When a specific repo
+> needs its own token (e.g. different marketplace publisher), add a **repo-level
+> secret** with the same name — it overrides the org secret.
+
+---
+
 ## Overview
 
 | Reusable Workflow | Purpose | Replaces (per-repo) |
@@ -155,8 +178,7 @@ jobs:
       validate_release_branch: false
       project_type: npm
       publish_to_npm: false
-    secrets:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    secrets: inherit
 ```
 
 ---
@@ -218,8 +240,7 @@ jobs:
     with:
       target_branch: ${{ inputs.target_branch || 'main' }}
       project_type: npm
-    secrets:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    secrets: inherit
 ```
 
 ---
@@ -310,3 +331,6 @@ jobs:
    pattern (wait → changelog-preview → call reusable-prerelease → cleanup).
 4. Identical simple workflows (dependabot-auto-merge, stale, sync-labels, etc.)
    are already handled by `template-sync-reusable.yml` and were not included here.
+5. **Org secrets**: Ensure `VSCE_PAT` and `NPM_TOKEN` are configured as org-level
+   secrets so every repo inherits them automatically. Repos that need custom tokens
+   can override with a repo-level secret of the same name.
