@@ -130,22 +130,13 @@ Component Coverage: Issue distribution across components
 1. **Add files** to `winccoa-tools-pack/.github`:
    - `labels/labels.yml`
    - `repos.txt`
-   - `.github/workflows/sync-labels-reusable.yml`
-   - `.github/workflows/run-single-sync.yml` (optional convenience)
-   - `.github/workflows/fanout-labels.yml`
    - `docs/LABELS.md`
 
 2. **Create org secret** `ORG_LABELS_PAT` (scope: `repo`).
 
 3. **Test**:
-   - Run **Run single-target label sync** with `dry-run: true` for a test repo.
-   - Then run with `dry-run: false`.
-   - Run **Fan-out** for all repos when ready (start with `dry-run: true`).
-
-4. **(Optional)** Add a **cron** schedule to `fanout-labels.yml`:
-   ```yaml
-   schedule:
-     - cron: "15 3 * * 1-5"  # every weekday at 03:15 UTC
+   - Use the GitHub CLI or API to sync labels for a test repo.
+   - Verify labels match `labels/labels.yml`.
 
 ---
 

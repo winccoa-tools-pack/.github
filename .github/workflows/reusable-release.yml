@@ -1,0 +1,368 @@
+##
+# Reusable Release Workflow
+#
+# Centralized release workflow for all winccoa-tools-pack repositories.
+# Handles both VS Code extension (VSIX → Marketplace) and npm library (tarball → npm) releases.
+#
+# Flow: versioning → precheck (find matching prerelease) → tag → release (download + publish)
+#
+# Usage (VS Code extension):
+#   jobs:
+#     release:
+#       uses: winccoa-tools-pack/.github/.github/workflows/reusable-release.yml@main
+#       with:
+#         target_branch: main
+#         project_type: vscode
+#       secrets: inherit
+#
+# Usage (npm library):
+#   jobs:
+#     release:
+#       uses: winccoa-tools-pack/.github/.github/workflows/reusable-release.yml@main
+#       with:
+#         target_branch: main
+#         project_type: npm
+#       secrets:
+#         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+##
+
+name: "Reusable: Release"
+
+on:
+  workflow_call:
+    inputs:
+      target_branch:
+        description: "Stable branch to release from (usually main)"
+        required: true
+        type: string
+      project_type:
+        description: "Project type: 'vscode' for VS Code extensions, 'npm' for npm libraries"
+        required: true
+        type: string
+    secrets:
+      VSCE_PAT:
+        description: "VS Code Marketplace personal access token (vscode projects only)"
+        required: false
+      NPM_TOKEN:
+        description: "npm token for publishing (npm projects only)"
+        required: false
+    outputs:
+      version:
+        description: "Released version (x.y.z)"
+        value: ${{ jobs.versioning.outputs.version }}
+      tag:
+        description: "Release tag (vX.Y.Z)"
+        value: ${{ jobs.versioning.outputs.tag }}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-pipeline-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  # ────────────────────────────────────────────
+  # Step 1 — Compute version (no tag yet)
+  # ────────────────────────────────────────────
+  versioning:
+    uses: winccoa-tools-pack/.github/.github/workflows/versioning-tags-changelog-reusable.yml@main
+    with:
+      mode: release
+      target_branch: ${{ inputs.target_branch }}
+      create_tag: false
+      push_tag: false
+    secrets: inherit
+
+  # ────────────────────────────────────────────
+  # Step 2 — Verify a matching prerelease exists
+  # ────────────────────────────────────────────
+  precheck:
+    runs-on: ubuntu-latest
+    needs: [versioning]
+    outputs:
+      prerelease_tag: ${{ steps.find.outputs.prerelease_tag }}
+    steps:
+      - name: Find matching prerelease for this version
+        id: find
+        shell: bash
+        run: |
+          VERSION="${{ needs.versioning.outputs.version }}"
+          PREFIX="v$VERSION-"
+          REPO="${GITHUB_REPOSITORY}"
+
+          echo "🔎 Looking for prerelease tags starting with: $PREFIX"
+
+          PRERELEASE_TAG=$(gh release list --repo "$REPO" --limit 200 \
+            --json tagName,isPrerelease,createdAt \
+            --jq "[.[] | select(.isPrerelease == true and (.tagName | startswith(\"$PREFIX\"))) ] | sort_by(.createdAt) | reverse | .[0].tagName" 2>/dev/null)
+
+          if [ -z "$PRERELEASE_TAG" ] || [ "$PRERELEASE_TAG" = "null" ]; then
+            echo "❌ ERROR: No matching prerelease found for version $VERSION (expected tag like v$VERSION-<sha>)"
+            echo "Hint: run prerelease workflow on release/v$VERSION first."
+            exit 1
+          fi
+
+          echo "✅ Found prerelease tag: $PRERELEASE_TAG"
+          echo "prerelease_tag=$PRERELEASE_TAG" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ────────────────────────────────────────────
+  # Step 3 — Create & push release tag
+  # ────────────────────────────────────────────
+  tag:
+    uses: winccoa-tools-pack/.github/.github/workflows/versioning-tags-changelog-reusable.yml@main
+    needs: [precheck]
+    with:
+      mode: release
+      target_branch: ${{ inputs.target_branch }}
+      create_tag: true
+      push_tag: true
+      force_push_tag: ${{ inputs.project_type == 'npm' }}
+    secrets: inherit
+
+  # ────────────────────────────────────────────────────────────────
+  # Step 4 — Download tested artifact, publish, create GH release
+  # ────────────────────────────────────────────────────────────────
+  release:
+    runs-on: ubuntu-latest
+    needs: [versioning, precheck, tag]
+    steps:
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          registry-url: ${{ inputs.project_type == 'npm' && 'https://registry.npmjs.org' || '' }}
+          scope: ${{ inputs.project_type == 'npm' && '@winccoa-tools-pack' || '' }}
+
+      # ─────────────────────────────────────
+      # VS Code extension release path
+      # ─────────────────────────────────────
+      - name: Install vsce
+        if: ${{ inputs.project_type == 'vscode' }}
+        run: npm install -g @vscode/vsce
+
+      - name: Download tested VSIX from prerelease
+        if: ${{ inputs.project_type == 'vscode' }}
+        shell: bash
+        run: |
+          mkdir -p dist
+          PRERELEASE_TAG="${{ needs.precheck.outputs.prerelease_tag }}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          gh release download --repo "$REPO" "$PRERELEASE_TAG" --pattern "*.vsix" --dir dist
+
+          VSIX_PATH=$(ls -1 dist/*.vsix 2>/dev/null | head -n 1)
+          if [ -z "$VSIX_PATH" ]; then
+            echo "❌ ERROR: No .vsix found in prerelease assets for $PRERELEASE_TAG"
+            ls -la dist || true
+            exit 1
+          fi
+
+          echo "📦 Downloaded VSIX: $VSIX_PATH"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to VS Code Marketplace (if configured)
+        if: ${{ inputs.project_type == 'vscode' }}
+        shell: bash
+        run: |
+          VSIX_PATH=$(ls -1 dist/*.vsix 2>/dev/null | head -n 1)
+          if [ -z "$VSIX_PATH" ]; then
+            echo "❌ ERROR: No .vsix found in dist/"
+            exit 1
+          fi
+
+          if [ -n "${{ secrets.VSCE_PAT }}" ]; then
+            echo "🏪 Publishing tested VSIX to VS Code Marketplace..."
+            vsce publish --packagePath "$VSIX_PATH" -p "${{ secrets.VSCE_PAT }}"
+            echo "✅ Published to marketplace successfully!"
+          else
+            echo "⚠️ VSCE_PAT secret not found - skipping marketplace publish"
+          fi
+
+      # ─────────────────────────────────────
+      # npm library release path
+      # ─────────────────────────────────────
+      - name: Download and repack tarball with release version
+        if: ${{ inputs.project_type == 'npm' }}
+        shell: bash
+        run: |
+          mkdir -p dist staging
+          PRERELEASE_TAG="${{ needs.precheck.outputs.prerelease_tag }}"
+          REPO="${GITHUB_REPOSITORY}"
+          VERSION="${{ needs.versioning.outputs.version }}"
+
+          echo "📥 Downloading tarball from prerelease: $PRERELEASE_TAG"
+          gh release download --repo "$REPO" "$PRERELEASE_TAG" --pattern "*.tgz" --dir staging
+
+          TARBALL_PATH=$(ls -1 staging/*.tgz 2>/dev/null | head -n 1)
+          if [ -z "$TARBALL_PATH" ]; then
+            echo "❌ ERROR: No .tgz found in prerelease assets for $PRERELEASE_TAG"
+            ls -la staging || true
+            exit 1
+          fi
+
+          echo "📦 Downloaded tarball: $TARBALL_PATH"
+
+          # Extract, update version, and repack
+          # npm tarballs have a "package" folder inside
+          echo "📂 Extracting tarball..."
+          tar -xzf "$TARBALL_PATH" -C staging
+
+          echo "🔧 Updating version in package.json to: $VERSION"
+          # Use jq to update the version field
+          jq --arg version "$VERSION" '.version = $version' staging/package/package.json > staging/package/package.json.tmp
+          mv staging/package/package.json.tmp staging/package/package.json
+
+          # Capture package name for later steps (publish/deprecate/logging)
+          PACKAGE_NAME=$(jq -r '.name' staging/package/package.json)
+          echo "✅ Package name: $PACKAGE_NAME"
+          echo "PACKAGE_NAME=$PACKAGE_NAME" >> "$GITHUB_ENV"
+
+          # Verify the version was updated
+          UPDATED_VERSION=$(jq -r '.version' staging/package/package.json)
+          echo "✅ Version in package.json is now: $UPDATED_VERSION"
+
+          if [ "$UPDATED_VERSION" != "$VERSION" ]; then
+            echo "❌ ERROR: Version update failed"
+            exit 1
+          fi
+
+          # Repack with clean version name derived from npm package name
+          # Example: @scope/pkg -> scope-pkg
+          SAFE_NAME=$(echo "$PACKAGE_NAME" | sed -e 's/^@//' -e 's/[\/@]/-/g')
+          CLEAN_NAME="${SAFE_NAME}-${VERSION}.tgz"
+          echo "📦 Repacking as: dist/$CLEAN_NAME"
+          tar -czf "dist/$CLEAN_NAME" -C staging package
+
+          # Verify the new tarball
+          echo "📋 Contents of new tarball:"
+          tar -tzf "dist/$CLEAN_NAME" | head -20 || true
+
+          # Cleanup staging
+          rm -rf staging
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Publish to npm (dist-tag: latest)"
+        if: ${{ inputs.project_type == 'npm' && github.repository_owner == 'winccoa-tools-pack' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          TARBALL_PATH=$(ls -1 dist/*.tgz 2>/dev/null | head -n 1)
+          if [ -z "$TARBALL_PATH" ]; then
+            echo "❌ ERROR: No .tgz found in dist/"
+            exit 1
+          fi
+
+          echo "🚀 Publishing $TARBALL_PATH to npm..."
+          # Use ./ prefix to ensure npm treats this as a local file path, not a git URL
+          npm publish "./$TARBALL_PATH" --access public --ignore-scripts
+
+      # ─────────────────────────────────────
+      # GitHub Release (both project types)
+      # ─────────────────────────────────────
+      - name: Create GitHub release (vscode)
+        if: ${{ inputs.project_type == 'vscode' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          name: ${{ format('Release {0}', needs.tag.outputs.tag) }}
+          target_commitish: ${{ inputs.target_branch }}
+          body: |
+            ${{ needs.versioning.outputs.changelog }}
+
+            ### ✅ Tested Artifact
+            - Published from tested pre-release asset: `${{ needs.precheck.outputs.prerelease_tag }}`
+          files: "dist/*.vsix"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub release (npm)
+        if: ${{ inputs.project_type == 'npm' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          name: ${{ format('Release {0}', needs.tag.outputs.tag) }}
+          target_commitish: ${{ inputs.target_branch }}
+          body: |
+            ${{ needs.versioning.outputs.changelog }}
+
+            ### ✅ Tested Artifact
+            - Published from tested pre-release asset: `${{ needs.precheck.outputs.prerelease_tag }}`
+            - Published to npm with dist-tag: `latest`
+          files: "dist/*.tgz"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ─────────────────────────────────────
+      # Cleanup: deprecate npm prereleases
+      # ─────────────────────────────────────
+      - name: Deprecate pre-release npm versions
+        if: ${{ inputs.project_type == 'npm' && github.repository_owner == 'winccoa-tools-pack' }}
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="${{ needs.versioning.outputs.version }}"
+          PACKAGE="${PACKAGE_NAME}"
+
+          if [ -z "${PACKAGE:-}" ] || [ "${PACKAGE}" = "null" ]; then
+            echo "⚠️ PACKAGE_NAME not set; skipping npm deprecations"
+            exit 0
+          fi
+
+          echo "🧹 Deprecating pre-release npm versions for $VERSION..."
+
+          # Get all versions from npm that match the pre-release pattern (e.g., 0.2.1-abc1234)
+          PRERELEASE_VERSIONS=$(npm view "$PACKAGE" versions --json 2>/dev/null | \
+            jq -r ".[] | select(startswith(\"$VERSION-\"))" 2>/dev/null || echo "")
+
+          if [ -z "$PRERELEASE_VERSIONS" ]; then
+            echo "✅ No pre-release npm versions found for $VERSION"
+            exit 0
+          fi
+
+          for PRERELEASE_VERSION in $PRERELEASE_VERSIONS; do
+            echo "  - Deprecating $PACKAGE@$PRERELEASE_VERSION"
+            npm deprecate "$PACKAGE@$PRERELEASE_VERSION" "Superseded by stable release $VERSION" || \
+              echo "⚠️ Failed to deprecate $PRERELEASE_VERSION"
+          done
+
+          echo "✅ Pre-release npm versions deprecated"
+
+      # ─────────────────────────────────────
+      # Cleanup: delete GitHub prereleases
+      # ─────────────────────────────────────
+      - name: Cleanup GitHub prereleases for this version
+        shell: bash
+        run: |
+          VERSION="${{ needs.versioning.outputs.version }}"
+          PREFIX="v$VERSION-"
+          REPO="${GITHUB_REPOSITORY}"
+
+          echo "🧹 Deleting GitHub prereleases with tag prefix: $PREFIX"
+
+          TAGS=$(gh release list --repo "$REPO" --limit 200 --json tagName,isPrerelease \
+            --jq "[.[] | select(.isPrerelease == true and (.tagName | startswith(\"$PREFIX\"))) ] | .[].tagName")
+
+          if [ -z "$TAGS" ]; then
+            echo "✅ No GitHub prereleases to delete"
+            exit 0
+          fi
+
+          for TAG in $TAGS; do
+            echo "  - Deleting $TAG"
+            gh release delete --repo "$REPO" "$TAG" --yes --cleanup-tag || echo "⚠️ Failed to delete $TAG"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
