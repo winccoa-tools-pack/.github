@@ -19,7 +19,7 @@ priority:
 | `NPM_TOKEN` | `reusable-prerelease.yml`, `reusable-release.yml` | npm registry publish token |
 | `DOCKER_USER` | `reusable-ci-cd.yml` | Docker Hub username (integration tests) |
 | `DOCKER_PASSWORD` | `reusable-ci-cd.yml` | Docker Hub password (integration tests) |
-| `REPO_ADMIN_TOKEN` | `reusable-create-release-branch.yml` | Token to push to protected branches |
+| `REPO_ADMIN_TOKEN` | `reusable-create-release-branch.yml`, `reusable-apply-settings-and-rulesets.yml` | Token with admin access (push to protected branches, manage rulesets) |
 
 > **Setup**: Define `VSCE_PAT` and `NPM_TOKEN` as **org-level secrets** (Settings →
 > Secrets → Actions) so every repo gets them automatically. When a specific repo
@@ -36,6 +36,7 @@ priority:
 | `reusable-prerelease.yml` | Version bump + pre-release packaging | `prerelease-reusable.yml` |
 | `reusable-release.yml` | Tag + publish final release | `release-reusable.yml` |
 | `reusable-create-release-branch.yml` | Create release/hotfix branch + PR | `create-release-branch.yml` |
+| `reusable-apply-settings-and-rulesets.yml` | Apply repo settings & branch rulesets via API | `apply-settings-and-rulesets.yml` + `generate_settings_payloads.py` |
 
 All workflows live in `.github/workflows/` of this organisation repo and are called
 with `uses: winccoa-tools-pack/.github/.github/workflows/<file>@main`.
@@ -317,6 +318,58 @@ jobs:
       project_type: npm   # or: vscode
     secrets: inherit
 ```
+
+---
+
+## 5. Apply Settings & Rulesets – `reusable-apply-settings-and-rulesets.yml`
+
+Applies `.github/repository.settings.yml` and `.github/rulesets/*.yml` to the
+repository via the GitHub REST API. The Python helper script
+(`generate_settings_payloads.py`) lives in this org repo — consumer repos do
+**not** need a local copy of the script.
+
+### Inputs
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `apply` | `dry-run` prints payloads; `apply` updates the repo |
+
+### Secrets
+
+`REPO_ADMIN_TOKEN` — PAT with admin access. Repo-level overrides org-level.
+
+### Caller (identical for all repos)
+
+```yaml
+name: Apply Repo Settings & Rulesets
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - ".github/repository.settings.yml"
+      - ".github/rulesets/**"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run prints payloads; apply updates repo settings/rulesets"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - dry-run
+          - apply
+
+jobs:
+  apply:
+    uses: winccoa-tools-pack/.github/.github/workflows/reusable-apply-settings-and-rulesets.yml@main
+    with:
+      mode: ${{ inputs.mode || 'apply' }}
+    secrets: inherit
+```
+
+> **Note**: Once migrated, the per-repo copies of `apply-settings-and-rulesets.yml`
+> and `.github/scripts/generate_settings_payloads.py` can be deleted.
 
 ---
 

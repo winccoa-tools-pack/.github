@@ -1,0 +1,222 @@
+##
+# Reusable Apply Settings & Rulesets Workflow
+#
+# Centralized workflow that applies .github/repository.settings.yml and
+# .github/rulesets/*.yml to a repository via the GitHub REST API.
+#
+# The Python helper script (generate_settings_payloads.py) lives in this
+# org repo — consumer repos do NOT need a local copy.
+#
+# Secret resolution (handled by GitHub automatically):
+#   1. Repository-level secret  (user-defined per repo — highest priority)
+#   2. Organization-level secret (shared fallback for the whole org)
+#   Callers just use `secrets: inherit` — GitHub resolves the priority.
+#
+# Usage (thin caller in any consumer repo):
+#   name: Apply Repo Settings & Rulesets
+#   on:
+#     push:
+#       branches: [develop, main]
+#       paths:
+#         - ".github/repository.settings.yml"
+#         - ".github/rulesets/**"
+#     workflow_dispatch:
+#       inputs:
+#         mode:
+#           description: "dry-run prints payloads; apply updates repo settings/rulesets"
+#           required: true
+#           default: "apply"
+#           type: choice
+#           options: [dry-run, apply]
+#   jobs:
+#     apply:
+#       uses: winccoa-tools-pack/.github/.github/workflows/reusable-apply-settings-and-rulesets.yml@main
+#       with:
+#         mode: ${{ inputs.mode || 'apply' }}
+#       secrets: inherit
+##
+
+name: "Reusable: Apply Settings & Rulesets"
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "'dry-run' prints payloads without applying; 'apply' updates the repo."
+        required: false
+        default: "apply"
+        type: string
+    secrets:
+      REPO_ADMIN_TOKEN:
+        description: "PAT with admin access to the caller repo (repo-level overrides org-level)"
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout the CALLER repo (has .github/repository.settings.yml + rulesets) ──
+      - name: Checkout caller repository
+        uses: actions/checkout@v6
+
+      # ── 2. Fetch the Python helper from the org repo ──
+      - name: Download settings payload generator
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p __org_tools
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/winccoa-tools-pack/.github/contents/.github/scripts/generate_settings_payloads.py?ref=main" \
+            > __org_tools/generate_settings_payloads.py
+          echo "✅ Downloaded generate_settings_payloads.py from org repo"
+
+      # ── 3. Generate JSON payloads ──
+      - name: Install Python tooling
+        shell: bash
+        run: |
+          python3 --version
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pyyaml
+
+      - name: Prepare payloads from YAML
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 __org_tools/generate_settings_payloads.py --repo-root .
+
+          if [ -f .github/repository.settings.yml ]; then
+            echo "has_settings=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_settings=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if ls -1 ruleset_payloads/*.json >/dev/null 2>&1; then
+            echo "has_rulesets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_rulesets=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 4. Dry-run: just print ──
+      - name: Dry-run summary
+        if: ${{ inputs.mode == 'dry-run' }}
+        shell: bash
+        run: |
+          echo "--- repo_patch.json ---"; cat repo_patch.json; echo
+          echo "--- topics.json ---"; cat topics.json; echo
+          echo "--- security.json ---"; cat security.json; echo
+          echo "--- rulesets ---"
+          for f in ruleset_payloads/*.json; do
+            [ -f "$f" ] || continue
+            echo "  $f:"; cat "$f"; echo
+          done
+
+      # ── 5. Validate token ──
+      - name: Validate GitHub token (repo admin)
+        if: ${{ inputs.mode == 'apply' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::GH_TOKEN is empty. Ensure REPO_ADMIN_TOKEN exists (recommended) or GITHUB_TOKEN is available."
+            exit 1
+          fi
+
+          REPO="${{ github.repository }}"
+          IFS='/' read -r OWNER NAME <<< "$REPO"
+
+          HAS_ADMIN=$(gh api -H "Accept: application/vnd.github+json" "repos/$OWNER/$NAME" --jq '.permissions.admin // false' || echo "false")
+          if [ "$HAS_ADMIN" != "true" ]; then
+            echo "::error::Token does not have admin access to $REPO."
+            echo "::error::Fix: set REPO_ADMIN_TOKEN with classic scope 'repo' (authorize SSO if needed), or fine-grained PAT with Administration: Read and write."
+            exit 1
+          fi
+
+          # Rulesets endpoint also requires admin access
+          gh api -H "Accept: application/vnd.github+json" "repos/$OWNER/$NAME/rulesets" >/dev/null
+
+      # ── 6. Apply repository settings ──
+      - name: Apply repository settings
+        if: ${{ inputs.mode == 'apply' && steps.prep.outputs.has_settings == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          IFS='/' read -r OWNER NAME <<< "$REPO"
+
+          if [ "$(jq 'length' repo_patch.json)" -gt 0 ]; then
+            echo "📝 Applying repository settings..."
+            gh api --method PATCH -H "Accept: application/vnd.github+json" \
+              "repos/$OWNER/$NAME" --input repo_patch.json
+            echo "✅ Repository settings applied"
+          fi
+
+          if jq -e 'type=="array"' topics.json >/dev/null; then
+            echo "🏷️ Updating topics..."
+            python3 -c "import json; t=json.load(open('topics.json','r',encoding='utf-8')); json.dump({'names': t}, open('topics_payload.json','w',encoding='utf-8'))"
+            gh api --method PUT -H "Accept: application/vnd.github+json" \
+              "repos/$OWNER/$NAME/topics" --input topics_payload.json
+            echo "✅ Topics updated"
+          else
+            echo "Skipping topics update (not specified)."
+          fi
+
+          if jq -e '.enable_vulnerability_alerts==true' security.json >/dev/null; then
+            echo "🔒 Enabling vulnerability alerts..."
+            gh api --method PUT -H "Accept: application/vnd.github+json" \
+              "repos/$OWNER/$NAME/vulnerability-alerts" || true
+          fi
+          if jq -e '.enable_automated_security_fixes==true' security.json >/dev/null; then
+            echo "🔒 Enabling automated security fixes..."
+            gh api --method PUT -H "Accept: application/vnd.github+json" \
+              "repos/$OWNER/$NAME/automated-security-fixes" || true
+          fi
+
+      # ── 7. Upsert rulesets ──
+      - name: Upsert repository rulesets
+        if: ${{ inputs.mode == 'apply' && steps.prep.outputs.has_rulesets == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          IFS='/' read -r OWNER NAME <<< "$REPO"
+
+          gh api -H "Accept: application/vnd.github+json" "repos/$OWNER/$NAME/rulesets" > existing_rulesets.json
+
+          for payload in ruleset_payloads/*.json; do
+            RS_NAME=$(jq -r '.name // empty' "$payload")
+            if [ -z "$RS_NAME" ]; then
+              echo "⚠️ Skipping $payload (missing .name)"
+              continue
+            fi
+
+            RS_ID=$(jq -r --arg n "$RS_NAME" '.[] | select(.name==$n) | .id' existing_rulesets.json | head -n 1)
+            if [ -n "$RS_ID" ] && [ "$RS_ID" != "null" ]; then
+              echo "🔄 Updating ruleset: $RS_NAME (id=$RS_ID)"
+              gh api --method PUT -H "Accept: application/vnd.github+json" \
+                "repos/$OWNER/$NAME/rulesets/$RS_ID" --input "$payload"
+            else
+              echo "➕ Creating ruleset: $RS_NAME"
+              gh api --method POST -H "Accept: application/vnd.github+json" \
+                "repos/$OWNER/$NAME/rulesets" --input "$payload"
+            fi
+          done
+
+      # ── Cleanup ──
+      - name: Cleanup temporary files
+        if: always()
+        shell: bash
+        run: rm -rf __org_tools ruleset_payloads repo_patch.json topics.json topics_payload.json security.json existing_rulesets.json

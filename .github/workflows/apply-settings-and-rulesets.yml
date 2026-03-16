@@ -1,0 +1,27 @@
+name: Apply Repo Settings & Rulesets
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/repository.settings.yml"
+      - ".github/rulesets/**"
+      - ".github/workflows/apply-settings-and-rulesets.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run prints payloads; apply updates repo settings/rulesets"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - dry-run
+          - apply
+
+jobs:
+  apply:
+    uses: winccoa-tools-pack/.github/.github/workflows/reusable-apply-settings-and-rulesets.yml@main
+    with:
+      mode: ${{ inputs.mode || 'apply' }}
+    secrets: inherit
