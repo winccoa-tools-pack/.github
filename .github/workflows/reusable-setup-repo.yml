@@ -1,0 +1,383 @@
+###############################################################################
+# 🔧  Reusable: One-time repository initialisation
+#
+#  Called by each template's setup-repo.yml after "Use this template".
+#
+#  What it does:
+#    1. Replaces template placeholders in package.json, README.md, etc.
+#    2. Resets the version to 0.0.1
+#    3. Creates the `develop` branch (GitFlow default branch)
+#    4. Sets develop as the default branch via GitHub API
+#    5. Triggers apply-settings-and-rulesets.yml (branch protection)
+#    6. Commits everything, then deletes the caller's setup-repo.yml
+#       so derived repos don't carry the init logic.
+#
+#  Supports both vscode and npm project types.
+###############################################################################
+name: "Reusable: Setup new repository"
+
+on:
+  workflow_call:
+    inputs:
+      project_type:
+        description: "Project type: vscode or npm"
+        required: true
+        type: string
+      template_repo:
+        description: "Full name of the template repo (e.g. winccoa-tools-pack/template-vscode-extension)"
+        required: true
+        type: string
+      repo_description:
+        description: "Short repo description (used in package.json & repository.settings.yml)"
+        required: false
+        type: string
+        default: ""
+      display_name:
+        description: "Display name (VS Code: 'WinCC OA — My Tool' / npm: package description)"
+        required: false
+        type: string
+        default: ""
+      template_package_name:
+        description: "The npm package name used in the template (will be replaced)"
+        required: false
+        type: string
+        default: "winccoa-hello-world"
+      template_readme_title:
+        description: "The README H1 title in the template (will be replaced)"
+        required: false
+        type: string
+        default: "WinCC OA VS Code Extension Template"
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      # ── 0. Checkout ────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # ── 1. Detect repo metadata ───────────────────────────────────
+      - name: Gather repo info
+        id: meta
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const projectType = '${{ inputs.project_type }}';
+
+            // Fetch repo metadata from API
+            const { data } = await github.rest.repos.get({ owner, repo });
+
+            const repoName = repo;
+            const inputDesc = `${{ inputs.repo_description }}`;
+            const inputDisplay = `${{ inputs.display_name }}`;
+
+            // ── Description ──
+            let description;
+            if (inputDesc) {
+              description = inputDesc;
+            } else if (data.description) {
+              description = data.description;
+            } else if (projectType === 'vscode') {
+              description = `VS Code extension: ${repo}`;
+            } else {
+              description = `WinCC OA npm package: ${repo}`;
+            }
+
+            // ── Display name ──
+            let displayName;
+            if (inputDisplay) {
+              displayName = inputDisplay;
+            } else if (projectType === 'vscode') {
+              displayName = repo
+                .replace(/^vscode-winccoa-/, '')
+                .replace(/-/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase())
+                .replace(/^/, 'WinCC OA — ');
+            } else {
+              // npm: derive a readable name
+              displayName = repo
+                .replace(/^npm-winccoa-/, '')
+                .replace(/-/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase());
+            }
+
+            // ── npm package name ──
+            let npmName;
+            if (projectType === 'npm') {
+              npmName = `@${owner}/${repoName.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
+            } else {
+              npmName = repoName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+            }
+
+            const templateRepo = '${{ inputs.template_repo }}';
+            const templateRepoName = templateRepo.split('/').pop();
+
+            core.setOutput('repo_name', repoName);
+            core.setOutput('repo_full', `${owner}/${repo}`);
+            core.setOutput('owner', owner);
+            core.setOutput('description', description);
+            core.setOutput('display_name', displayName);
+            core.setOutput('npm_name', npmName);
+            core.setOutput('repo_url', `https://github.com/${owner}/${repo}`);
+            core.setOutput('template_repo_name', templateRepoName);
+            core.setOutput('project_type', projectType);
+
+            core.info(`📦 repo:           ${repoName}`);
+            core.info(`📝 description:    ${description}`);
+            core.info(`🏷️  displayName:    ${displayName}`);
+            core.info(`📛 npm name:       ${npmName}`);
+            core.info(`🔧 project type:   ${projectType}`);
+            core.info(`📄 template repo:  ${templateRepoName}`);
+
+      # ── 2. Check if setup already ran ──────────────────────────────
+      - name: Check if already initialised
+        id: check
+        run: |
+          if [ ! -f ".github/workflows/setup-repo.yml" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "⏭️  Setup already completed (workflow file absent). Skipping."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 3. Replace placeholders ────────────────────────────────────
+      - name: Replace template placeholders
+        if: steps.check.outputs.skip != 'true'
+        env:
+          REPO_NAME: ${{ steps.meta.outputs.repo_name }}
+          REPO_FULL: ${{ steps.meta.outputs.repo_full }}
+          OWNER: ${{ steps.meta.outputs.owner }}
+          DESCRIPTION: ${{ steps.meta.outputs.description }}
+          DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
+          NPM_NAME: ${{ steps.meta.outputs.npm_name }}
+          REPO_URL: ${{ steps.meta.outputs.repo_url }}
+          PROJECT_TYPE: ${{ steps.meta.outputs.project_type }}
+          TEMPLATE_REPO: ${{ inputs.template_repo }}
+          TEMPLATE_REPO_NAME: ${{ steps.meta.outputs.template_repo_name }}
+          TEMPLATE_PKG_NAME: ${{ inputs.template_package_name }}
+        run: |
+          set -euo pipefail
+          echo "🔄 Replacing placeholders (project_type=${PROJECT_TYPE})…"
+
+          # ── package.json ──
+          if [ -f package.json ]; then
+            tmp=$(mktemp)
+            if [ "$PROJECT_TYPE" = "vscode" ]; then
+              jq --arg name "$NPM_NAME" \
+                 --arg displayName "$DISPLAY_NAME" \
+                 --arg desc "$DESCRIPTION" \
+                 --arg repoUrl "${REPO_URL}.git" \
+                 --arg bugsUrl "${REPO_URL}/issues" \
+                 --arg homepage "${REPO_URL}#readme" \
+                '
+                  .name = $name |
+                  .displayName = $displayName |
+                  .description = $desc |
+                  .version = "0.0.1" |
+                  .repository.url = $repoUrl |
+                  .bugs.url = $bugsUrl |
+                  .homepage = $homepage
+                ' package.json > "$tmp" && mv "$tmp" package.json
+            else
+              # npm: scoped package name, no displayName
+              jq --arg name "$NPM_NAME" \
+                 --arg desc "$DESCRIPTION" \
+                 --arg repoUrl "${REPO_URL}.git" \
+                 --arg bugsUrl "${REPO_URL}/issues" \
+                 --arg homepage "${REPO_URL}#readme" \
+                '
+                  .name = $name |
+                  .description = $desc |
+                  .version = "0.0.1" |
+                  .repository.url = $repoUrl |
+                  .bugs.url = $bugsUrl |
+                  .homepage = $homepage
+                ' package.json > "$tmp" && mv "$tmp" package.json
+            fi
+            echo "  ✅ package.json"
+          fi
+
+          # ── package-lock.json (if present) ──
+          if [ -f package-lock.json ]; then
+            sed -i "s|\"${TEMPLATE_PKG_NAME}\"|\"${NPM_NAME}\"|g" package-lock.json
+            sed -i 's|"0\.[0-9]*\.[0-9]*"|"0.0.1"|' package-lock.json
+            echo "  ✅ package-lock.json"
+          fi
+
+          # ── repository.settings.yml ──
+          SETTINGS=".github/repository.settings.yml"
+          if [ -f "$SETTINGS" ]; then
+            sed -i "s|description:.*|description: \"${DESCRIPTION}\"|" "$SETTINGS"
+            echo "  ✅ repository.settings.yml"
+          fi
+
+          # ── README.md ──
+          if [ -f README.md ]; then
+            # Replace org/template-repo references (badge URLs, links)
+            sed -i "s|${TEMPLATE_REPO}|${REPO_FULL}|g" README.md
+            # Replace template title if present
+            TEMPLATE_TITLE="${{ inputs.template_readme_title }}"
+            if [ -n "$TEMPLATE_TITLE" ]; then
+              sed -i "s|^# ${TEMPLATE_TITLE}|# ${DISPLAY_NAME}|" README.md
+            fi
+            echo "  ✅ README.md"
+          fi
+
+          # ── CONTRIBUTING.md ──
+          if [ -f CONTRIBUTING.md ]; then
+            sed -i "s|${TEMPLATE_REPO_NAME}|${REPO_NAME}|g" CONTRIBUTING.md
+            echo "  ✅ CONTRIBUTING.md"
+          fi
+
+          # ── Generic: replace <your-repository> placeholders ──
+          find . -name '*.json' -o -name '*.md' -o -name '*.yml' -o -name '*.yaml' | \
+            grep -v node_modules | grep -v .git/ | \
+            xargs sed -i "s|<your-repository>|${REPO_NAME}|g" 2>/dev/null || true
+          echo "  ✅ <your-repository> placeholders"
+
+          # ── CHANGELOG.md — start fresh ──
+          cat > CHANGELOG.md << 'CHLOG'
+          # Changelog
+
+          All notable changes to this project will be documented in this file.
+
+          The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+          and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+          ## [Unreleased]
+          CHLOG
+          sed -i 's/^          //' CHANGELOG.md
+          echo "  ✅ CHANGELOG.md (reset)"
+
+          echo ""
+          echo "🎉 All placeholders replaced."
+
+      # ── 4. Create develop branch ───────────────────────────────────
+      - name: Create develop branch
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          if git ls-remote --exit-code --heads origin develop >/dev/null 2>&1; then
+            echo "ℹ️  develop branch already exists, skipping creation."
+          else
+            echo "🌿 Creating develop branch from main…"
+            git checkout -b develop
+            git push origin develop
+            git checkout main
+            echo "✅ develop branch created and pushed."
+          fi
+
+      # ── 5. Set develop as default branch ───────────────────────────
+      - name: Set develop as default branch
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            try {
+              await github.rest.repos.update({
+                owner,
+                repo,
+                default_branch: 'develop',
+              });
+              core.info('✅ Default branch set to develop');
+            } catch (err) {
+              core.warning(`Could not set default branch: ${err.message}`);
+            }
+
+      # ── 6. Commit changes ─────────────────────────────────────────
+      - name: Commit initialisation changes
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Remove the caller workflow so it doesn't run again
+          git rm .github/workflows/setup-repo.yml
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "ℹ️  No changes to commit."
+          else
+            git commit -m "chore: initialise repo from template
+
+          Auto-generated by setup-repo workflow:
+          - Replaced template placeholders with repo-specific values
+          - Reset version to 0.0.1
+          - Reset CHANGELOG.md
+          - Removed setup-repo.yml (one-time use)"
+            git push origin main
+            echo "✅ Initialisation commit pushed to main."
+          fi
+
+      # ── 7. Push changes to develop too ─────────────────────────────
+      - name: Fast-forward develop
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          git checkout develop
+          git merge main --ff-only || git merge main --no-edit
+          git push origin develop
+          echo "✅ develop branch updated with init commit."
+
+      # ── 8. Trigger rulesets / settings ─────────────────────────────
+      - name: Apply repository settings & rulesets
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner,
+                repo,
+                workflow_id: 'apply-settings-and-rulesets.yml',
+                ref: 'develop',
+                inputs: { mode: 'apply' },
+              });
+              core.info('✅ Triggered apply-settings-and-rulesets.yml');
+            } catch (err) {
+              core.warning(`Could not trigger settings workflow: ${err.message}`);
+              core.warning('Run manually: Actions → Apply Repo Settings & Rulesets → Run workflow');
+            }
+
+      # ── 9. Summary ─────────────────────────────────────────────────
+      - name: Print summary
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PROJECT_TYPE: ${{ inputs.project_type }}
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║  🎉  Repository setup complete!                        ║"
+          echo "╠══════════════════════════════════════════════════════════╣"
+          echo "║                                                        ║"
+          echo "║  ✅ Placeholders replaced in package.json, README, etc ║"
+          echo "║  ✅ Version reset to 0.0.1                             ║"
+          echo "║  ✅ CHANGELOG.md reset                                 ║"
+          echo "║  ✅ develop branch created (default)                   ║"
+          echo "║  ✅ Branch protection / rulesets triggered              ║"
+          echo "║  ✅ setup-repo.yml removed (one-time use)              ║"
+          echo "║                                                        ║"
+          if [ "$PROJECT_TYPE" = "vscode" ]; then
+          echo "║  Next steps:                                           ║"
+          echo "║  • Update resources/icon.png with your extension icon  ║"
+          echo "║  • Configure activationEvents in package.json          ║"
+          echo "║  • Add VSCE_PAT secret (or use org-level token)        ║"
+          echo "║  • Start developing on a feature/* branch              ║"
+          else
+          echo "║  Next steps:                                           ║"
+          echo "║  • Update src/ with your library code                  ║"
+          echo "║  • Configure exports in package.json                   ║"
+          echo "║  • Add NPM_TOKEN secret (or use org-level ORG_PAT)    ║"
+          echo "║  • Start developing on a feature/* branch              ║"
+          fi
+          echo "║                                                        ║"
+          echo "╚══════════════════════════════════════════════════════════╝"
