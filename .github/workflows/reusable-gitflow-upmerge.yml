@@ -1,0 +1,250 @@
+##
+# Reusable GitFlow Upmerge Workflow
+#
+# After a push to main (typically a release merge), this workflow creates or
+# updates a PR that merges main back into develop — the standard GitFlow
+# "upmerge" step.
+#
+# Features:
+#   - Dedicated upmerge branch (feature/upmerge-main-to-develop)
+#   - Auto-resolves conflicts in favour of main (-X theirs)
+#   - Creates PR as draft when structural conflicts remain
+#   - Enables auto-merge (squash) so the PR merges once CI passes
+#   - Detailed conflict resolution instructions in PR body
+#   - workflow_dispatch trigger for manual re-runs
+#
+# Secret resolution (handled by GitHub automatically):
+#   1. Repository-level secret  (user-defined per repo — highest priority)
+#   2. Organization-level secret (shared fallback for the whole org)
+#   Callers just use `secrets: inherit` — GitHub resolves the priority.
+#
+# Usage (thin caller in any consumer repo):
+#   name: GitFlow (Upmerge main → develop via PR)
+#   on:
+#     push:
+#       branches: [main]
+#     workflow_dispatch: {}
+#   jobs:
+#     upmerge:
+#       uses: winccoa-tools-pack/.github/.github/workflows/reusable-gitflow-upmerge.yml@main
+#       secrets: inherit
+##
+
+name: "Reusable: GitFlow Upmerge"
+
+on:
+  workflow_call:
+    inputs:
+      source_branch:
+        description: "Branch to merge FROM (usually main)"
+        required: false
+        default: "main"
+        type: string
+      target_branch:
+        description: "Branch to merge INTO (usually develop)"
+        required: false
+        default: "develop"
+        type: string
+      upmerge_branch:
+        description: "Intermediate branch name for the upmerge PR"
+        required: false
+        default: "feature/upmerge-main-to-develop"
+        type: string
+      auto_merge_method:
+        description: "Auto-merge method to enable on the PR (SQUASH, MERGE, REBASE, or empty to disable)"
+        required: false
+        default: "SQUASH"
+        type: string
+    secrets:
+      REPO_ADMIN_TOKEN:
+        description: "PAT with repo access — required so the push/PR triggers downstream workflows (CI/CD, Git Flow Validation). Falls back to GITHUB_TOKEN if empty."
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: upmerge-${{ inputs.source_branch || 'main' }}-to-${{ inputs.target_branch || 'develop' }}
+  cancel-in-progress: false
+
+jobs:
+  upmerge:
+    name: Create/Update Upmerge PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          # A PAT is required so that the push / PR-create fires pull_request
+          # events, which in turn trigger the required status checks (CI/CD,
+          # PR Labels, Git Flow Validation).  The default GITHUB_TOKEN
+          # deliberately suppresses those events to prevent recursive loops.
+          token: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+
+      - name: Configure git identity
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Prepare upmerge branch
+        id: prep
+        shell: bash
+        env:
+          UP_BRANCH: ${{ inputs.upmerge_branch }}
+          BASE_BRANCH: ${{ inputs.target_branch }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+        run: |
+          set -euo pipefail
+
+          echo "up_branch=$UP_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "base_branch=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "source_branch=$SOURCE_BRANCH" >> "$GITHUB_OUTPUT"
+
+          # Ensure we have the latest refs
+          git fetch origin "+refs/heads/$SOURCE_BRANCH:refs/remotes/origin/$SOURCE_BRANCH"
+          git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" || true
+          git fetch origin "+refs/heads/$UP_BRANCH:refs/remotes/origin/$UP_BRANCH" || true
+
+          if git show-ref --verify --quiet "refs/remotes/origin/$UP_BRANCH"; then
+            echo "Upmerge branch exists on origin: $UP_BRANCH"
+            git checkout -B "$UP_BRANCH" "origin/$UP_BRANCH"
+          else
+            echo "Creating upmerge branch from $BASE_BRANCH"
+            git checkout -B "$UP_BRANCH" "origin/$BASE_BRANCH"
+          fi
+
+          # Check if there is anything new on source that target doesn't have
+          if git diff --quiet "HEAD..origin/$SOURCE_BRANCH" 2>/dev/null; then
+            echo "Nothing to upmerge – $BASE_BRANCH already contains everything from $SOURCE_BRANCH."
+            echo "skip=true"  >> "$GITHUB_OUTPUT"
+            echo "had_conflicts=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          # Merge source into upmerge branch.
+          # -X theirs: on any conflict accept the content from the source branch
+          # (the release commit is authoritative for files it touched).
+          # This resolves conflicts caused by squash-merged release PRs where
+          # git cannot trace common ancestry.
+          if git merge --no-ff --no-edit -X theirs "origin/$SOURCE_BRANCH"; then
+            echo "had_conflicts=false" >> "$GITHUB_OUTPUT"
+          else
+            # -X theirs handles content conflicts automatically.
+            # If we still fail here it is a tree conflict (e.g. modify vs delete).
+            # Stage everything, preferring source's version, and commit.
+            echo "::warning::Merge had structural conflicts – auto-resolving in favour of $SOURCE_BRANCH."
+            git checkout --theirs . 2>/dev/null || true
+            git add -A
+            git -c core.editor=true merge --continue || \
+              git commit --no-edit -m "chore: upmerge $SOURCE_BRANCH to $BASE_BRANCH (auto-resolved)"
+            echo "had_conflicts=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push upmerge branch
+        if: steps.prep.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force-with-lease origin "${{ steps.prep.outputs.up_branch }}"
+
+      - name: Create or update PR
+        if: steps.prep.outputs.skip != 'true'
+        uses: actions/github-script@v8
+        env:
+          REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
+          AUTO_MERGE_METHOD: ${{ inputs.auto_merge_method }}
+        with:
+          github-token: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = '${{ steps.prep.outputs.up_branch }}';
+            const base = '${{ steps.prep.outputs.base_branch }}';
+            const source = '${{ steps.prep.outputs.source_branch }}';
+            const hadConflicts = '${{ steps.prep.outputs.had_conflicts }}' === 'true';
+            const autoMergeMethod = process.env.AUTO_MERGE_METHOD || '';
+
+            const title = `chore: upmerge ${source} to ${base}`;
+            const body = [
+              `This PR keeps \`${base}\` up to date with \`${source}\` by merging \`${source}\` into a dedicated upmerge branch.`,
+              '',
+              hadConflicts
+                ? [
+                    '**⚠️ Merge conflicts were detected and auto-resolved in favour of `' + source + '`.**',
+                    'Please review the changes carefully.',
+                    '',
+                    'If the auto-resolution is incorrect, resolve conflicts manually:',
+                    '```bash',
+                    `git fetch origin`,
+                    `git checkout ${head}`,
+                    `git merge origin/${base}`,
+                    '# resolve conflicts',
+                    'git add -A && git commit',
+                    'git push',
+                    '```',
+                  ].join('\n')
+                : 'No merge conflicts detected — auto-merge enabled.',
+            ].join('\n');
+
+            // Find existing open PR from head to base
+            const prs = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              head: `${owner}:${head}`,
+              base,
+              per_page: 20,
+            });
+
+            let prNumber;
+            if (prs.data.length > 0) {
+              const pr = prs.data[0];
+              prNumber = pr.number;
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: pr.number,
+                title,
+                body,
+                draft: hadConflicts ? true : pr.draft,
+              });
+              core.notice(`Updated PR #${pr.number} (${pr.html_url}).`);
+            } else {
+              const created = await github.rest.pulls.create({
+                owner,
+                repo,
+                head,
+                base,
+                title,
+                body,
+                draft: hadConflicts,
+              });
+              prNumber = created.data.number;
+              core.notice(`Created PR #${created.data.number} (${created.data.html_url}).`);
+            }
+
+            // Enable auto-merge so the PR merges once required status checks pass.
+            if (!hadConflicts && autoMergeMethod) {
+              try {
+                const { repository } = await github.graphql(`
+                  query($owner: String!, $repo: String!, $number: Int!) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $number) { id }
+                    }
+                  }`, { owner, repo, number: prNumber });
+                await github.graphql(`
+                  mutation($prId: ID!, $method: PullRequestMergeMethod!) {
+                    enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: $method }) {
+                      clientMutationId
+                    }
+                  }`, { prId: repository.pullRequest.id, method: autoMergeMethod });
+                core.notice(`Enabled auto-merge (${autoMergeMethod}) on PR #${prNumber}`);
+              } catch (e) {
+                core.warning(`Could not enable auto-merge on PR #${prNumber}: ${e.message}`);
+              }
+            }

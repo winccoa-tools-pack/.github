@@ -19,7 +19,7 @@ priority:
 | `NPM_TOKEN` | `reusable-prerelease.yml`, `reusable-release.yml` | npm registry publish token |
 | `DOCKER_USER` | `reusable-ci-cd.yml` | Docker Hub username (integration tests) |
 | `DOCKER_PASSWORD` | `reusable-ci-cd.yml` | Docker Hub password (integration tests) |
-| `REPO_ADMIN_TOKEN` | `reusable-create-release-branch.yml` | Token to push to protected branches |
+| `REPO_ADMIN_TOKEN` | `reusable-create-release-branch.yml`, `reusable-apply-settings-and-rulesets.yml` | Token with admin access (push to protected branches, manage rulesets) |
 
 > **Setup**: Define `VSCE_PAT` and `NPM_TOKEN` as **org-level secrets** (Settings →
 > Secrets → Actions) so every repo gets them automatically. When a specific repo
@@ -32,10 +32,12 @@ priority:
 
 | Reusable Workflow | Purpose | Replaces (per-repo) |
 |---|---|---|
-| `reusable-ci-cd.yml` | Lint, format, test, integration-test pipeline | `ci-cd.yml` |
+| `reusable-ci-cd.yml` | Lint, format, test, integration-test, Git Flow validation | `ci-cd.yml` + `gitflow-validation.yml` |
 | `reusable-prerelease.yml` | Version bump + pre-release packaging | `prerelease-reusable.yml` |
 | `reusable-release.yml` | Tag + publish final release | `release-reusable.yml` |
 | `reusable-create-release-branch.yml` | Create release/hotfix branch + PR | `create-release-branch.yml` |
+| `reusable-apply-settings-and-rulesets.yml` | Apply repo settings & branch rulesets via API | `apply-settings-and-rulesets.yml` + `generate_settings_payloads.py` |
+| `reusable-gitflow-upmerge.yml` | Upmerge main → develop via PR after release | `gitflow.yml` |
 
 All workflows live in `.github/workflows/` of this organisation repo and are called
 with `uses: winccoa-tools-pack/.github/.github/workflows/<file>@main`.
@@ -57,6 +59,23 @@ with `uses: winccoa-tools-pack/.github/.github/workflows/<file>@main`.
 | `fixture_config_path` | string | `./test/fixtures/…/config` | Host-side fixture check path |
 | `docker_image_name` | string | `mpokornyetm/…:npm-winccoa-core` | Docker image for integration tests |
 
+### Jobs
+
+The CI/CD pipeline now includes **8 jobs**:
+
+1. **changelog** — Verify CHANGELOG.md for release/hotfix PRs
+2. **lint** — ESLint + markdown lint
+3. **format** — Prettier format check
+4. **test** — Unit tests (2 OS × 4 Node versions matrix)
+5. **integration-winccoa** — WinCC OA Docker integration tests
+6. **gitflow-validation** — Git Flow branch naming + Conventional Commits (PR only)
+7. **remind-branch-deletion** — Comment reminder on merged PRs (PR closed + merged)
+8. **required** — Gate job for branch protection
+
+> **Note**: Jobs 6–7 replace the per-repo `gitflow-validation.yml` workflow. The
+> caller’s `on:` trigger must include `pull_request` with `types: [opened,
+> synchronize, reopened, edited, ready_for_review, closed]` for validation to run.
+
 ### Secrets
 
 `DOCKER_USER`, `DOCKER_PASSWORD` – optional, for Docker Hub auth.
@@ -71,7 +90,7 @@ on:
     branches: [main, develop, "release/**", "hotfix/**"]
   pull_request:
     branches: [main, develop]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, edited, ready_for_review, closed]
   workflow_dispatch:
     inputs:
       confirmed_local_tests:
@@ -102,7 +121,7 @@ on:
     branches: [main, develop, "release/**", "hotfix/**"]
   pull_request:
     branches: [main, develop]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, edited, ready_for_review, closed]
   workflow_dispatch:
     inputs:
       confirmed_local_tests:
@@ -317,6 +336,100 @@ jobs:
       project_type: npm   # or: vscode
     secrets: inherit
 ```
+
+---
+
+## 5. Apply Settings & Rulesets – `reusable-apply-settings-and-rulesets.yml`
+
+Applies `.github/repository.settings.yml` and `.github/rulesets/*.yml` to the
+repository via the GitHub REST API. The Python helper script
+(`generate_settings_payloads.py`) lives in this org repo — consumer repos do
+**not** need a local copy of the script.
+
+### Inputs
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `apply` | `dry-run` prints payloads; `apply` updates the repo |
+
+### Secrets
+
+`REPO_ADMIN_TOKEN` — PAT with admin access. Repo-level overrides org-level.
+
+### Caller (identical for all repos)
+
+```yaml
+name: Apply Repo Settings & Rulesets
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - ".github/repository.settings.yml"
+      - ".github/rulesets/**"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run prints payloads; apply updates repo settings/rulesets"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - dry-run
+          - apply
+
+jobs:
+  apply:
+    uses: winccoa-tools-pack/.github/.github/workflows/reusable-apply-settings-and-rulesets.yml@main
+    with:
+      mode: ${{ inputs.mode || 'apply' }}
+    secrets: inherit
+```
+
+> **Note**: Once migrated, the per-repo copies of `apply-settings-and-rulesets.yml`
+> and `.github/scripts/generate_settings_payloads.py` can be deleted.
+
+---
+
+## 6. GitFlow Upmerge – `reusable-gitflow-upmerge.yml`
+
+After a push to main (typically a release merge), creates or updates a PR that
+merges main back into develop — the standard GitFlow upmerge step.
+
+### Inputs
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `source_branch` | string | `main` | Branch to merge FROM |
+| `target_branch` | string | `develop` | Branch to merge INTO |
+| `upmerge_branch` | string | `feature/upmerge-main-to-develop` | Intermediate PR branch |
+| `auto_merge_method` | string | `SQUASH` | Auto-merge method (`SQUASH`, `MERGE`, `REBASE`, or empty) |
+
+### Secrets
+
+`REPO_ADMIN_TOKEN` — PAT with repo access. Required so the push/PR triggers
+downstream workflows (CI/CD, Git Flow Validation). Falls back to `GITHUB_TOKEN`.
+
+### Caller (identical for all repos)
+
+```yaml
+name: GitFlow (Upmerge main → develop via PR)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  upmerge:
+    uses: winccoa-tools-pack/.github/.github/workflows/reusable-gitflow-upmerge.yml@main
+    secrets: inherit
+```
+
+> **Note**: Once migrated, the per-repo copies of `gitflow.yml` can be deleted.
+> The 3 repos still using the legacy `Logerfo/gitflow-action@0.0.5`
+> (vscode-winccoa-ctrllang, githbut-ci-workflow-build-winccoa-docker-image,
+> vscode-winccoa-tests) should be migrated to this reusable workflow.
 
 ---
 
