@@ -47,6 +47,9 @@ on:
       VSCE_PAT:
         description: "VS Code Marketplace personal access token (vscode projects only)"
         required: false
+      ORG_VSCE_PAT:
+        description: "Organization-level fallback VS Code Marketplace PAT (vscode projects only)"
+        required: false
       NPM_TOKEN:
         description: "npm token for publishing (npm projects only)"
         required: false
@@ -178,12 +181,17 @@ jobs:
             exit 1
           fi
 
-          if [ -n "${{ secrets.VSCE_PAT }}" ]; then
+          PAT="${{ secrets.VSCE_PAT }}"
+          if [ -z "$PAT" ]; then
+            PAT="${{ secrets.ORG_VSCE_PAT }}"
+          fi
+
+          if [ -n "$PAT" ]; then
             echo "🏪 Publishing tested VSIX to VS Code Marketplace..."
-            vsce publish --packagePath "$VSIX_PATH" -p "${{ secrets.VSCE_PAT }}"
+            vsce publish --packagePath "$VSIX_PATH" -p "$PAT"
             echo "✅ Published to marketplace successfully!"
           else
-            echo "⚠️ VSCE_PAT secret not found - skipping marketplace publish"
+            echo "⚠️ VSCE_PAT/ORG_VSCE_PAT secret not found - skipping marketplace publish"
           fi
 
       # ─────────────────────────────────────

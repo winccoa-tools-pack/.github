@@ -370,7 +370,7 @@ jobs:
           echo "║  Next steps:                                           ║"
           echo "║  • Update resources/icon.png with your extension icon  ║"
           echo "║  • Configure activationEvents in package.json          ║"
-          echo "║  • Add VSCE_PAT secret (or use org-level token)        ║"
+          echo "║  • Add VSCE_PAT secret (or ORG_VSCE_PAT org secret)    ║"
           echo "║  • Start developing on a feature/* branch              ║"
           else
           echo "║  Next steps:                                           ║"
