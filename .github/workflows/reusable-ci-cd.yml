@@ -159,7 +159,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node-version: [20.x, 22.x, 24.x, 25.x]
+# node-version list contains all our supported node version
+# to eliminate count of allocated runners, keep this list small
+# here ere offcial node supported versions: https://nodejs.org/en/about/previous-releases
+# 22 is still supported in maintanance, but to decrease consts and waititng periods - I will remove it from our CI-CD
+        node-version: [24.x, 25.x]
     env:
       CI: true
     steps:
