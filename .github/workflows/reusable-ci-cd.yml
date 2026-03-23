@@ -164,6 +164,11 @@ jobs:
 # here ere offcial node supported versions: https://nodejs.org/en/about/previous-releases
 # 22 is still supported in maintanance, but to decrease consts and waititng periods - I will remove it from our CI-CD
         node-version: [24.x, 25.x]
+        exclude:
+          # Node 24.x is currently flaky on Windows for VS Code extension tests in CI.
+          # Keep Windows coverage on the latest stable (25.x) while retaining 24.x coverage on Ubuntu.
+          - os: windows-latest
+            node-version: 24.x
     env:
       CI: true
     steps:
