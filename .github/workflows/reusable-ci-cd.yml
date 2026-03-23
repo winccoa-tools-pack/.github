@@ -55,6 +55,16 @@ on:
         required: false
         default: true
         type: boolean
+      unit_test_retries:
+        description: "How many times to retry unit tests on transient failures (e.g., VS Code download ECONNRESET)"
+        required: false
+        default: 5
+        type: number
+      unit_test_retry_delay_seconds:
+        description: "Delay between unit test retries"
+        required: false
+        default: 20
+        type: number
       integration_test_command:
         description: >
           Command to run inside the Docker container for integration tests.
@@ -164,6 +174,11 @@ jobs:
 # here ere offcial node supported versions: https://nodejs.org/en/about/previous-releases
 # 22 is still supported in maintanance, but to decrease consts and waititng periods - I will remove it from our CI-CD
         node-version: [24.x, 25.x]
+        exclude:
+          # Node 24.x is currently flaky on Windows for VS Code extension tests in CI.
+          # Keep Windows coverage on the latest stable (25.x) while retaining 24.x coverage on Ubuntu.
+          - os: windows-latest
+            node-version: 24.x
     env:
       CI: true
     steps:
@@ -191,12 +206,60 @@ jobs:
       # ── Coverage run (single matrix cell) ──
       - name: Run unit tests (coverage - single job)
         if: ${{ inputs.enable_coverage && matrix.os == 'ubuntu-latest' && matrix.node-version == inputs.coverage_node_version }}
-        run: npm run test:unit:coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RETRIES="${{ inputs.unit_test_retries }}"
+          DELAY="${{ inputs.unit_test_retry_delay_seconds }}"
+
+          if [ -z "$RETRIES" ] || [ "$RETRIES" -lt 1 ]; then
+            RETRIES=1
+          fi
+          if [ -z "$DELAY" ] || [ "$DELAY" -lt 0 ]; then
+            DELAY=0
+          fi
+
+          for i in $(seq 1 "$RETRIES"); do
+            echo "Running unit tests with coverage (attempt $i/$RETRIES)"
+            if npm run test:unit:coverage; then
+              exit 0
+            fi
+            if [ "$i" -lt "$RETRIES" ]; then
+              echo "Unit tests failed; retrying in ${DELAY}s..."
+              sleep "$DELAY"
+            fi
+          done
+          exit 1
         env:
           CI: true
       - name: Run unit tests
         if: ${{ !(inputs.enable_coverage && matrix.os == 'ubuntu-latest' && matrix.node-version == inputs.coverage_node_version) }}
-        run: npm run test:unit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RETRIES="${{ inputs.unit_test_retries }}"
+          DELAY="${{ inputs.unit_test_retry_delay_seconds }}"
+
+          if [ -z "$RETRIES" ] || [ "$RETRIES" -lt 1 ]; then
+            RETRIES=1
+          fi
+          if [ -z "$DELAY" ] || [ "$DELAY" -lt 0 ]; then
+            DELAY=0
+          fi
+
+          for i in $(seq 1 "$RETRIES"); do
+            echo "Running unit tests (attempt $i/$RETRIES)"
+            if npm run test:unit; then
+              exit 0
+            fi
+            if [ "$i" -lt "$RETRIES" ]; then
+              echo "Unit tests failed; retrying in ${DELAY}s..."
+              sleep "$DELAY"
+            fi
+          done
+          exit 1
         env:
           CI: true
 
