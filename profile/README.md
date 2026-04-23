@@ -4,9 +4,9 @@
 **Professional project management and development tools for Siemens WinCC Open Architecture**
 
 This organization collects modular Node.js libraries, GitHub Actions, reusable workflows, and VS Code extensions for **Siemens WinCC Open Architecture** (SCADA) development.
-It provides essential tools for project management, code quality, testing, deploy and documentation for locale developments (vs-code extensions, AI MPC-server) and various CI/CD tools like github, gitlab, Jenkins, azure ...
+It provides essential tools for project management, code quality, testing, deploy and documentation for local developments (vs-code extensions, AI MCP-server) and various CI/CD tools like github, gitlab, Jenkins, azure ...
 
-### Highlights?
+### Highlights
 
 ✅ **Modern Development Experience** - Bring WinCC OA development into the modern IDE era  
 ✅ **Increased Productivity** - Automate repetitive tasks and streamline workflows  
@@ -30,9 +30,9 @@ Special thanks to all our [contributors](https://github.com/orgs/winccoa-tools-p
 
 ## 📜 License
 
-This project is basically licensed under the **MIT License** - see the [LICENSE](https://github.com/winccoa-tools-pack/.github/blob/main/LICENSE) file for details.
+This project is licensed under the **MIT License** - see the [LICENSE](https://github.com/winccoa-tools-pack/.github/blob/main/LICENSE) file for details.
 
-It might happens, that the partial repositories contains third party SW which are using other license models.
+Some repositories may contain third-party software that uses different license models.
 
 ---
 

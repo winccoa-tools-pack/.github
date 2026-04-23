@@ -3,7 +3,7 @@
 **Professional project management and development tools for Siemens WinCC Open Architecture**
 
 This organization collects modular Node.js libraries, GitHub Actions, reusable workflows, and VS Code extensions for **Siemens WinCC Open Architecture** (SCADA) development.
-It provides essential tools for project management, code quality, testing, deploy and documentation for locale developments (vs-code extensions, AI MPC-server) and various CI/CD tools like github, gitlab, Jenkins, azure ...
+It provides essential tools for project management, code quality, testing, deployment, and documentation for local developments (vs-code extensions, AI MCP-server) and various CI/CD tools like github, gitlab, Jenkins, azure ...
 
 # 🧰 WinCC OA Tools Pack — Community & Governance
 
@@ -57,7 +57,7 @@ These documents explain how ideas move through the ecosystem and how we keep eve
 
 All new issues must use one of the templates provided in:
 
-.gith8b/ISSUE_TEMPLATE/
+.github/ISSUE_TEMPLATE/
 
 Available templates include:
 
