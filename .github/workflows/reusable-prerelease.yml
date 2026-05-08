@@ -114,7 +114,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # â”€â”€ VS Code: install vsce â”€â”€
+      # -- VS Code: install vsce --
       - name: Install vsce
         if: ${{ inputs.project_type == 'vscode' }}
         run: npm install -g @vscode/vsce
@@ -128,13 +128,13 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      # â”€â”€ npm: update package.json version â”€â”€
+      # -- npm: update package.json version --
       - name: Set package.json version
         if: ${{ inputs.project_type == 'npm' }}
         shell: bash
         run: npm pkg set version="${{ steps.meta.outputs.version }}"
 
-      # â”€â”€ Release body â”€â”€
+      # -- Release body --
       - name: Build release body (vscode)
         if: ${{ inputs.project_type == 'vscode' }}
         id: body-vscode
@@ -170,12 +170,12 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # â”€â”€ VS Code: package VSIX â”€â”€
+      # -- VS Code: package VSIX --
       - name: Package extension (VSIX)
         if: ${{ inputs.project_type == 'vscode' }}
         run: vsce package
 
-      # â”€â”€ npm: build & pack tarball â”€â”€
+      # -- npm: build & pack tarball --
       - name: Build package
         if: ${{ inputs.project_type == 'npm' }}
         run: npm run build
@@ -195,7 +195,7 @@ jobs:
         run: |
           echo "Skipping npm publish: NPM_TOKEN is not available in this workflow run (e.g. Dependabot PR)."
 
-      # â”€â”€ Upload artifact â”€â”€
+      # -- Upload artifact --
       - name: Upload VSIX artifact
         if: ${{ inputs.project_type == 'vscode' }}
         uses: actions/upload-artifact@v6
@@ -212,7 +212,7 @@ jobs:
           path: "*.tgz"
           retention-days: 14
 
-      # â”€â”€ GitHub prerelease â”€â”€
+      # -- GitHub prerelease --
       - name: Create GitHub prerelease
         uses: softprops/action-gh-release@v2
         with:
