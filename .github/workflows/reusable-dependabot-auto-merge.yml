@@ -1,0 +1,86 @@
+##
+# Reusable: Dependabot auto-merge
+#
+# Purpose:
+# - Keep Dependabot PR branches up-to-date (best-effort rebase)
+# - Enable GitHub auto-merge (squash by default)
+#
+# Usage (thin caller in any repo):
+#
+# name: Dependabot (auto-merge)
+# on:
+#   pull_request:
+# jobs:
+#   dependabot-auto-merge:
+#     if: github.actor == 'dependabot[bot]'
+#     permissions:
+#       contents: write
+#       pull-requests: write
+#     uses: winccoa-tools-pack/.github/.github/workflows/reusable-dependabot-auto-merge.yml@main
+#     with:
+#       pr_url: ${{ github.event.pull_request.html_url }}
+#
+
+name: "Reusable: Dependabot Auto-merge"
+
+on:
+  workflow_call:
+    inputs:
+      pr_url:
+        description: "Pull request URL (e.g. https://github.com/OWNER/REPO/pull/123)"
+        required: true
+        type: string
+      merge_method:
+        description: "Merge method (squash|merge|rebase)"
+        required: false
+        default: "squash"
+        type: string
+      update_branch:
+        description: "Whether to try updating the PR branch before enabling auto-merge"
+        required: false
+        default: true
+        type: boolean
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    name: Enable auto-merge for Dependabot PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Validate actor (defense in depth)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.actor }}" != "dependabot[bot]" ]; then
+            echo "Not running: github.actor is '${{ github.actor }}'" >&2
+            exit 1
+          fi
+
+      - name: Update branch if behind (best-effort)
+        if: inputs.update_branch
+        shell: bash
+        env:
+          PR_URL: ${{ inputs.pr_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr update-branch --rebase "$PR_URL" || true
+
+      - name: Enable auto-merge
+        shell: bash
+        env:
+          PR_URL: ${{ inputs.pr_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          method="${{ inputs.merge_method }}"
+          case "$method" in
+            squash|merge|rebase) ;;
+            *) echo "Invalid merge_method: '$method' (expected squash|merge|rebase)" >&2; exit 2;;
+          esac
+          gh pr merge --auto --"$method" "$PR_URL"
