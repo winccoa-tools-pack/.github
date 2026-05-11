@@ -45,6 +45,10 @@ on:
         required: false
         default: true
         type: boolean
+    secrets:
+      REPO_ADMIN_TOKEN:
+        description: "PAT with repo access (recommended). Ensures branch updates trigger downstream workflows; falls back to GITHUB_TOKEN if unset."
+        required: false
 
 permissions: {}
 
@@ -72,7 +76,7 @@ jobs:
         env:
           PR_URL: ${{ inputs.pr_url }}
           GH_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
         run: |
           set -euo pipefail
           gh pr update-branch --repo "$GH_REPO" --rebase "$PR_URL" || true
@@ -83,7 +87,7 @@ jobs:
         env:
           PR_URL: ${{ inputs.pr_url }}
           GH_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
         run: |
           set -euo pipefail
           gh pr review --repo "$GH_REPO" --approve "$PR_URL" --body "Auto-approved Dependabot PR." || true
@@ -93,7 +97,7 @@ jobs:
         env:
           PR_URL: ${{ inputs.pr_url }}
           GH_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
         run: |
           set -euo pipefail
           method="${{ inputs.merge_method }}"
