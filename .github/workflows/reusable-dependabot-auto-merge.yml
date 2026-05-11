@@ -66,15 +66,17 @@ jobs:
         shell: bash
         env:
           PR_URL: ${{ inputs.pr_url }}
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh pr update-branch --rebase "$PR_URL" || true
+          gh pr update-branch --repo "$GH_REPO" --rebase "$PR_URL" || true
 
       - name: Enable auto-merge
         shell: bash
         env:
           PR_URL: ${{ inputs.pr_url }}
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -83,4 +85,4 @@ jobs:
             squash|merge|rebase) ;;
             *) echo "Invalid merge_method: '$method' (expected squash|merge|rebase)" >&2; exit 2;;
           esac
-          gh pr merge --auto --"$method" "$PR_URL"
+          gh pr merge --repo "$GH_REPO" --auto --"$method" "$PR_URL"
