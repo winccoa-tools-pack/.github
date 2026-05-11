@@ -71,12 +71,14 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           BASE_BRANCH: ${{ inputs.base_branch }}
         run: |
           set -euo pipefail
 
           # Collect PR URLs (one per line) for open Dependabot PRs targeting BASE_BRANCH
           gh pr list \
+            --repo "$GH_REPO" \
             --state open \
             --base "$BASE_BRANCH" \
             --author "dependabot[bot]" \
@@ -99,11 +101,12 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           while IFS= read -r pr; do
             echo "Updating branch: $pr"
-            gh pr update-branch --rebase "$pr" || true
+            gh pr update-branch --repo "$GH_REPO" --rebase "$pr" || true
           done < pr_urls.txt
 
       - name: Enable auto-merge
@@ -111,6 +114,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           MERGE_METHOD: ${{ inputs.merge_method }}
         run: |
           set -euo pipefail
@@ -123,5 +127,5 @@ jobs:
 
           while IFS= read -r pr; do
             echo "Enabling auto-merge ($method): $pr"
-            gh pr merge --auto --"$method" "$pr" || true
+            gh pr merge --repo "$GH_REPO" --auto --"$method" "$pr" || true
           done < pr_urls.txt
