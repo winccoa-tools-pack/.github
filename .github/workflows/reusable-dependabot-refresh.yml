@@ -1,0 +1,127 @@
+##
+# Reusable: Dependabot refresh on base-branch updates
+#
+# Purpose:
+# - Whenever the base branch (e.g. develop) moves forward, Dependabot PR branches may become behind.
+# - This workflow finds all open Dependabot PRs targeting that base branch and:
+#   1) updates/rebases the branch (best-effort)
+#   2) enables auto-merge (squash by default)
+#
+# Usage (thin caller in any repo):
+#
+# name: Dependabot (refresh)
+# on:
+#   push:
+#     branches: [develop]
+# jobs:
+#   dependabot-refresh:
+#     permissions:
+#       contents: write
+#       pull-requests: write
+#     uses: winccoa-tools-pack/.github/.github/workflows/reusable-dependabot-refresh.yml@main
+#     secrets: inherit
+#     with:
+#       base_branch: develop
+#       merge_method: squash
+#
+
+name: "Reusable: Dependabot Refresh"
+
+on:
+  workflow_call:
+    inputs:
+      base_branch:
+        description: "Base branch to target (usually develop)"
+        required: false
+        default: "develop"
+        type: string
+      merge_method:
+        description: "Merge method to auto-enable (squash|merge|rebase)"
+        required: false
+        default: "squash"
+        type: string
+      update_branch:
+        description: "Whether to try updating/rebasing PR branches before enabling auto-merge"
+        required: false
+        default: true
+        type: boolean
+      enable_auto_merge:
+        description: "Whether to enable auto-merge on PRs (true recommended)"
+        required: false
+        default: true
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: dependabot-refresh-${{ github.repository }}-${{ inputs.base_branch }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh Dependabot PRs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: List open Dependabot PRs
+        id: list
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+        run: |
+          set -euo pipefail
+
+          # Collect PR URLs (one per line) for open Dependabot PRs targeting BASE_BRANCH
+          gh pr list \
+            --state open \
+            --base "$BASE_BRANCH" \
+            --author "dependabot[bot]" \
+            --json url \
+            --limit 200 \
+            > prs.json
+
+          count=$(jq 'length' prs.json)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Found $count Dependabot PR(s) targeting '$BASE_BRANCH'."
+
+          if [ "$count" -eq 0 ]; then
+            exit 0
+          fi
+
+          jq -r '.[].url' prs.json > pr_urls.txt
+
+      - name: Update branches (best-effort)
+        if: steps.list.outputs.count != '0' && inputs.update_branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r pr; do
+            echo "Updating branch: $pr"
+            gh pr update-branch --rebase "$pr" || true
+          done < pr_urls.txt
+
+      - name: Enable auto-merge
+        if: steps.list.outputs.count != '0' && inputs.enable_auto_merge
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_METHOD: ${{ inputs.merge_method }}
+        run: |
+          set -euo pipefail
+
+          method="$MERGE_METHOD"
+          case "$method" in
+            squash|merge|rebase) ;;
+            *) echo "Invalid merge_method: '$method' (expected squash|merge|rebase)" >&2; exit 2;;
+          esac
+
+          while IFS= read -r pr; do
+            echo "Enabling auto-merge ($method): $pr"
+            gh pr merge --auto --"$method" "$pr" || true
+          done < pr_urls.txt
