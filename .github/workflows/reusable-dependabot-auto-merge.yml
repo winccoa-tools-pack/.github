@@ -30,6 +30,11 @@ on:
         description: "Pull request URL (e.g. https://github.com/OWNER/REPO/pull/123)"
         required: true
         type: string
+      approve_pr:
+        description: "Whether to auto-approve the PR (required only if branch protection requires approvals)"
+        required: false
+        default: false
+        type: boolean
       merge_method:
         description: "Merge method (squash|merge|rebase)"
         required: false
@@ -71,6 +76,17 @@ jobs:
         run: |
           set -euo pipefail
           gh pr update-branch --repo "$GH_REPO" --rebase "$PR_URL" || true
+
+      - name: Approve PR (optional)
+        if: inputs.approve_pr
+        shell: bash
+        env:
+          PR_URL: ${{ inputs.pr_url }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr review --repo "$GH_REPO" --approve "$PR_URL" --body "Auto-approved Dependabot PR." || true
 
       - name: Enable auto-merge
         shell: bash

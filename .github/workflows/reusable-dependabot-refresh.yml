@@ -45,6 +45,11 @@ on:
         required: false
         default: true
         type: boolean
+      approve_prs:
+        description: "Whether to auto-approve Dependabot PRs (use only if branch protection requires approvals)"
+        required: false
+        default: false
+        type: boolean
       enable_auto_merge:
         description: "Whether to enable auto-merge on PRs (true recommended)"
         required: false
@@ -107,6 +112,19 @@ jobs:
           while IFS= read -r pr; do
             echo "Updating branch: $pr"
             gh pr update-branch --repo "$GH_REPO" --rebase "$pr" || true
+          done < pr_urls.txt
+
+      - name: Approve PRs (optional)
+        if: steps.list.outputs.count != '0' && inputs.approve_prs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r pr; do
+            echo "Approving: $pr"
+            gh pr review --repo "$GH_REPO" --approve "$pr" --body "Auto-approved Dependabot PR." || true
           done < pr_urls.txt
 
       - name: Enable auto-merge
