@@ -89,6 +89,11 @@ on:
         required: false
         default: "chore,release"
         type: string
+      auto_release:
+        description: "If true: automatically add the 3-day no-review countdown label (used for automated releases)"
+        required: false
+        default: false
+        type: boolean
       project_type:
         description: "Project type: 'vscode' for VS Code extensions, 'npm' for npm libraries"
         required: true
@@ -96,6 +101,14 @@ on:
     secrets:
       REPO_ADMIN_TOKEN:
         required: false
+
+    outputs:
+      branch:
+        description: "Created or reused release branch name"
+        value: ${{ jobs.create.outputs.branch }}
+      pr_url:
+        description: "Created or reused PR URL"
+        value: ${{ jobs.create.outputs.pr_url }}
 
 concurrency:
   group: create-release-branch-${{ github.repository }}-${{ inputs.version }}
@@ -109,6 +122,9 @@ permissions:
 jobs:
   create:
     runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.branch.outputs.branch }}
+      pr_url: ${{ steps.pr.outputs.pr_url }}
     steps:
       # ── 1. Create the release / hotfix branch via the GitHub API ────────
       - name: Create branch (release/hotfix)
@@ -286,6 +302,13 @@ jobs:
             const draft = ${{ inputs.draft }};
             const labelsRaw = '${{ inputs.labels }}'.trim();
             const labels = labelsRaw ? labelsRaw.split(',').map(l => l.trim()).filter(Boolean) : [];
+            const autoRelease = ${{ inputs.auto_release }};
+            if (autoRelease) {
+              labels.push('merge-in-3-days-without-review');
+            }
+
+            // Deduplicate labels
+            const uniqueLabels = Array.from(new Set(labels));
 
             const head = `${context.repo.owner}:${releaseBranch}`;
             const existing = await github.rest.pulls.list({
@@ -300,6 +323,21 @@ jobs:
             if (existing.data.length > 0) {
               const pr = existing.data[0];
               core.info(`PR already exists: ${pr.html_url}`);
+
+              if (uniqueLabels.length > 0) {
+                try {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    labels: uniqueLabels,
+                  });
+                  core.info(`Applied labels: ${uniqueLabels.join(', ')}`);
+                } catch (error) {
+                  core.warning(`Could not apply labels (${uniqueLabels.join(', ')}): ${error.message}`);
+                }
+              }
+
               core.setOutput('branch', releaseBranch);
               core.setOutput('pr_url', pr.html_url);
               return;
@@ -346,17 +384,17 @@ jobs:
 
             core.info(`Created PR: ${pr.data.html_url}`);
 
-            if (labels.length > 0) {
+            if (uniqueLabels.length > 0) {
               try {
                 await github.rest.issues.addLabels({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: pr.data.number,
-                  labels,
+                  labels: uniqueLabels,
                 });
-                core.info(`Applied labels: ${labels.join(', ')}`);
+                core.info(`Applied labels: ${uniqueLabels.join(', ')}`);
               } catch (error) {
-                core.warning(`Could not apply labels (${labels.join(', ')}): ${error.message}`);
+                core.warning(`Could not apply labels (${uniqueLabels.join(', ')}): ${error.message}`);
               }
             }
 
