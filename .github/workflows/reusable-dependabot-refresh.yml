@@ -109,9 +109,10 @@ jobs:
         if: steps.list.outputs.count != '0' && inputs.update_branch
         shell: bash
         env:
-          # Use GITHUB_TOKEN for updating branches to avoid PAT `workflow` scope restrictions
-          # when PRs modify workflow files.
-          GH_TOKEN: ${{ github.token }}
+          # NOTE: Updating PR branches can be blocked when the PR modifies workflow files.
+          # If you want this to work for workflow-touching PRs, provide REPO_ADMIN_TOKEN
+          # with sufficient workflow permissions.
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
