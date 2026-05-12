@@ -228,15 +228,13 @@ jobs:
           set -euo pipefail
 
           title="chore(release): v$NEXT"
-          body=$(cat <<EOF
-This PR was created automatically after a Dependabot PR was merged into \`${{ inputs.base_branch }}\`.
-
-- Version bump: \`${{ inputs.version_file }}\` → \`$NEXT\` (patch +0.0.1)
-- Branch: \`$RELEASE_BRANCH\`
-
-Once this PR is merged, the normal prerelease/release pipelines should run.
-EOF
-)
+          body=$(
+            printf '%s\n\n%s\n%s\n\n%s\n' \
+              'This PR was created automatically after a Dependabot PR was merged into `${{ inputs.base_branch }}`.' \
+              '- Version bump: `${{ inputs.version_file }}` -> `'$NEXT'` (patch +0.0.1)' \
+              '- Branch: `'$RELEASE_BRANCH'`' \
+              'Once this PR is merged, the normal prerelease/release pipelines should run.'
+          )
 
           pr_url=$(gh pr create \
             --repo "$GH_REPO" \
