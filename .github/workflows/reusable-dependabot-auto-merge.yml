@@ -59,6 +59,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write
 
     steps:
       - name: Validate actor (defense in depth)
@@ -93,6 +94,22 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
         run: |
           set -euo pipefail
+
+          pr_number=$(echo "$PR_URL" | sed -n 's#.*/pull/\([0-9]\+\).*#\1#p')
+          if [ -z "$pr_number" ]; then
+            echo "Could not parse PR number from URL: $PR_URL" >&2
+            exit 1
+          fi
+
+          me=$(gh api user --jq .login)
+          echo "Approver identity: $me"
+
+          already=$(gh api "/repos/$GH_REPO/pulls/$pr_number/reviews" --jq "[.[] | select(.user.login == \"$me\" and .state == \"APPROVED\")] | length")
+          if [ "$already" -gt 0 ]; then
+            echo "Already approved by $me; skipping duplicate approval comment."
+            exit 0
+          fi
+
           gh pr review --repo "$GH_REPO" --approve "$PR_URL" --body "Auto-approved Dependabot PR." || true
 
       - name: Enable auto-merge
@@ -109,3 +126,19 @@ jobs:
             *) echo "Invalid merge_method: '$method' (expected squash|merge|rebase)" >&2; exit 2;;
           esac
           gh pr merge --repo "$GH_REPO" --auto --"$method" "$PR_URL"
+
+      - name: Label PR (merge without review)
+        shell: bash
+        env:
+          PR_URL: ${{ inputs.pr_url }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          label="merge-without-review"
+
+          # Create label if missing (best-effort)
+          gh api --silent "/repos/$GH_REPO/labels/$label" >/dev/null 2>&1 || \
+            gh api --silent -X POST "/repos/$GH_REPO/labels" -f name="$label" -f color="BFDADC" -f description="Configured to merge automatically without waiting for review." >/dev/null 2>&1 || true
+
+          gh pr edit --repo "$GH_REPO" "$PR_URL" --add-label "$label" || true
