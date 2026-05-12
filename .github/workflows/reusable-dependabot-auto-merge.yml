@@ -76,9 +76,10 @@ jobs:
         env:
           PR_URL: ${{ inputs.pr_url }}
           GH_REPO: ${{ github.repository }}
-          # Use GITHUB_TOKEN for updating branches to avoid PAT `workflow` scope restrictions
-          # when PRs modify workflow files.
-          GH_TOKEN: ${{ github.token }}
+          # NOTE: Updating PR branches can be blocked when the PR modifies workflow files.
+          # If you want this to work for workflow-touching PRs, provide REPO_ADMIN_TOKEN
+          # with sufficient workflow permissions.
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
         run: |
           set -euo pipefail
           gh pr update-branch --repo "$GH_REPO" --rebase "$PR_URL" || true
