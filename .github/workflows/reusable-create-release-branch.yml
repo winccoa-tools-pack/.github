@@ -262,7 +262,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/generate-changelog.mjs --write
+          if [ -f "scripts/generate-changelog.mjs" ]; then
+            node scripts/generate-changelog.mjs --write
+          else
+            echo "No scripts/generate-changelog.mjs found; skipping CHANGELOG generation."
+          fi
 
       - name: Commit and push changes
         shell: bash
