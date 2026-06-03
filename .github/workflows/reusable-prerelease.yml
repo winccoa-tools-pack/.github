@@ -5,11 +5,11 @@
 # Handles both VS Code extension (VSIX) and npm library (tarball) projects.
 #
 # Secret resolution (handled by GitHub automatically):
-#   1. Repository-level secret  (user-defined per repo — highest priority)
+#   1. Repository-level secret  (user-defined per repo - highest priority)
 #   2. Organization-level secret (shared fallback for the whole org)
-#   Callers just use `secrets: inherit` — GitHub resolves the priority.
+#   Callers just use `secrets: inherit` - GitHub resolves the priority.
 #
-# Usage (VS Code extension — caller: pre-release.yml or pre-release-develop.yml):
+# Usage (VS Code extension - caller: pre-release.yml or pre-release-develop.yml):
 #   jobs:
 #     pre-release:
 #       uses: winccoa-tools-pack/.github/.github/workflows/reusable-prerelease.yml@main
@@ -72,9 +72,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ────────────────────────────────────────────
-  # Versioning (shared — delegates to existing reusable)
-  # ────────────────────────────────────────────
+  # --------------------------------------------
+  # Versioning (shared - delegates to existing reusable)
+  # --------------------------------------------
   versioning:
     uses: winccoa-tools-pack/.github/.github/workflows/versioning-tags-changelog-reusable.yml@main
     with:
@@ -85,9 +85,9 @@ jobs:
       force_push_tag: true
     secrets: inherit
 
-  # ────────────────────────────────────────────
+  # --------------------------------------------
   # Build & publish prerelease
-  # ────────────────────────────────────────────
+  # --------------------------------------------
   prerelease:
     runs-on: ubuntu-latest
     needs: [versioning]
@@ -114,7 +114,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # ── VS Code: install vsce ──
+      # -- VS Code: install vsce --
       - name: Install vsce
         if: ${{ inputs.project_type == 'vscode' }}
         run: npm install -g @vscode/vsce
@@ -128,13 +128,13 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      # ── npm: update package.json version ──
+      # -- npm: update package.json version --
       - name: Set package.json version
         if: ${{ inputs.project_type == 'npm' }}
         shell: bash
         run: npm pkg set version="${{ steps.meta.outputs.version }}"
 
-      # ── Release body ──
+      # -- Release body --
       - name: Build release body (vscode)
         if: ${{ inputs.project_type == 'vscode' }}
         id: body-vscode
@@ -144,7 +144,7 @@ jobs:
             echo "body<<EOF"
             echo "${{ needs.versioning.outputs.changelog }}"
             echo ""
-            echo "### 🔍 Testing Notes"
+            echo "### Testing Notes"
             echo "- This is a **pre-release** build; download the attached VSIX and test locally"
             echo "- Source branch: ${{ inputs.target_branch }}"
             echo "- Report issues at: https://github.com/${{ github.repository }}/issues"
@@ -161,7 +161,7 @@ jobs:
             echo "body<<EOF"
             echo "${{ needs.versioning.outputs.changelog }}"
             echo ""
-            echo "### 🔍 Testing Notes"
+            echo "### Testing Notes"
             echo "- This is a **pre-release** npm package published with dist-tag **next**"
             echo "- Install: npm i $PACKAGE_NAME@${{ steps.meta.outputs.version }}"
             echo "- Or: npm i $PACKAGE_NAME@next"
@@ -170,12 +170,12 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # ── VS Code: package VSIX ──
+      # -- VS Code: package VSIX --
       - name: Package extension (VSIX)
         if: ${{ inputs.project_type == 'vscode' }}
         run: vsce package
 
-      # ── npm: build & pack tarball ──
+      # -- npm: build & pack tarball --
       - name: Build package
         if: ${{ inputs.project_type == 'npm' }}
         run: npm run build
@@ -185,12 +185,17 @@ jobs:
         run: npm pack
 
       - name: "Publish to npm (dist-tag: next)"
-        if: ${{ inputs.project_type == 'npm' && inputs.publish_to_npm && github.repository_owner == 'winccoa-tools-pack' }}
+        if: ${{ inputs.project_type == 'npm' && inputs.publish_to_npm && github.repository_owner == 'winccoa-tools-pack' && secrets.NPM_TOKEN != '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --tag next --access public --ignore-scripts
 
-      # ── Upload artifact ──
+      - name: "Skip npm publish (no token available)"
+        if: ${{ inputs.project_type == 'npm' && inputs.publish_to_npm && github.repository_owner == 'winccoa-tools-pack' && secrets.NPM_TOKEN == '' }}
+        run: |
+          echo "Skipping npm publish: NPM_TOKEN is not available in this workflow run (e.g. Dependabot PR)."
+
+      # -- Upload artifact --
       - name: Upload VSIX artifact
         if: ${{ inputs.project_type == 'vscode' }}
         uses: actions/upload-artifact@v6
@@ -207,12 +212,12 @@ jobs:
           path: "*.tgz"
           retention-days: 14
 
-      # ── GitHub prerelease ──
+      # -- GitHub prerelease --
       - name: Create GitHub prerelease
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: ${{ format('🧪 Pre-Release {0}', steps.meta.outputs.tag) }}
+          name: ${{ format('Pre-Release {0}', steps.meta.outputs.tag) }}
           target_commitish: ${{ inputs.target_branch != '' && inputs.target_branch || github.sha }}
           body: ${{ inputs.project_type == 'vscode' && steps.body-vscode.outputs.body || steps.body-npm.outputs.body }}
           files: ${{ inputs.project_type == 'vscode' && '*.vsix' || '*.tgz' }}
