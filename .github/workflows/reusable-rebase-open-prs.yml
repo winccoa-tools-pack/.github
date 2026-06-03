@@ -1,0 +1,18 @@
+name: "Reusable: Rebase open PRs"
+
+on:
+  workflow_call:
+    secrets:
+      GH_TOKEN_PAT:
+        description: "PAT used to rebase PR branches (needs repo + workflow permissions if rebasing PRs that touch workflows)"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  rebase-prs:
+    uses: mPokornyETM/rebase-open-prs-action/.github/workflows/rebase-open-prs.yml@v1
+    secrets:
+      GH_PAT: ${{ secrets.GH_TOKEN_PAT }}

@@ -1,0 +1,255 @@
+##
+# Reusable: Create release PR after Dependabot merge to develop
+#
+# Goal:
+# - When develop receives commits from a Dependabot PR, automatically prepare a release PR into main.
+# - Bumps patch version (x.y.(z+1)) in package.json and creates a release branch release/vX.Y.Z.
+# - Opens (or reuses) a PR from release/vX.Y.Z -> main.
+# - Optionally enables auto-merge.
+#
+# Why this approach:
+# - Your existing prerelease/release pipelines are PR/main based.
+# - Creating a release PR is the cleanest way to hook into that system.
+#
+# Caller example:
+# name: Dependabot (create release PR)
+# on:
+#   push:
+#     branches: [develop]
+# jobs:
+#   create-release-pr:
+#     permissions:
+#       contents: write
+#       pull-requests: write
+#     uses: winccoa-tools-pack/.github/.github/workflows/reusable-dependabot-release-pr.yml@main
+#     secrets: inherit
+#     with:
+#       base_branch: develop
+#       target_branch: main
+#       enable_auto_merge: false
+#
+
+name: "Reusable: Dependabot → Release PR"
+
+on:
+  workflow_call:
+    inputs:
+      base_branch:
+        description: "Branch to watch for Dependabot merges (usually develop)"
+        required: false
+        default: "develop"
+        type: string
+      target_branch:
+        description: "Stable branch to release into (usually main)"
+        required: false
+        default: "main"
+        type: string
+      version_file:
+        description: "Version file (default: package.json)"
+        required: false
+        default: "package.json"
+        type: string
+      version_key:
+        description: "JSON key containing version (default: version)"
+        required: false
+        default: "version"
+        type: string
+      enable_auto_merge:
+        description: "If true, enable auto-merge on the created release PR"
+        required: false
+        default: false
+        type: boolean
+      auto_merge_method:
+        description: "Auto-merge method (squash|merge|rebase)"
+        required: false
+        default: "squash"
+        type: string
+      project_type:
+        description: "Project type: 'vscode' for VS Code extensions, 'npm' for npm libraries"
+        required: false
+        default: "npm"
+        type: string
+      auto_release:
+        description: "If true: add a 3-day no-review countdown label so the PR auto-approves/merges after the window"
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      REPO_ADMIN_TOKEN:
+        description: "PAT with repo access (recommended). Helps ensure PR creation triggers downstream workflows reliably."
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: dependabot-release-pr-${{ github.repository }}-${{ inputs.base_branch }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect + compute next version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      dependabot: ${{ steps.detect.outputs.dependabot }}
+      next: ${{ steps.ver.outputs.next }}
+      found: ${{ steps.existing.outputs.found }}
+      existing_url: ${{ steps.existing.outputs.url }}
+
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.base_branch }}
+          token: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+
+      - name: Configure git identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Detect whether this push includes a Dependabot PR
+        id: detect
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          echo "Checking associated PR(s) for commit: $SHA"
+
+          # Find PRs associated with this commit.
+          # Accept header kept permissive for compatibility.
+          prs_json=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/$GH_REPO/commits/$SHA/pulls")
+
+          count=$(echo "$prs_json" | jq 'length')
+          echo "Associated PR count: $count"
+
+          if [ "$count" -eq 0 ]; then
+            echo "dependabot=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # True if ANY associated PR author is dependabot[bot]
+          is_dep=$(echo "$prs_json" | jq -r 'any(.[]; .user.login == "dependabot[bot]")')
+          echo "dependabot=$is_dep" >> "$GITHUB_OUTPUT"
+
+          if [ "$is_dep" != "true" ]; then
+            echo "No Dependabot PR associated with this commit."
+            exit 0
+          fi
+
+          pr_list=$(echo "$prs_json" | jq -r '.[].html_url' | tr '\n' ' ')
+          echo "Dependabot PR(s): $pr_list"
+
+      - name: Stop (not a Dependabot change)
+        if: steps.detect.outputs.dependabot != 'true'
+        run: echo "No Dependabot-associated PR detected for this push; skipping release PR creation."
+
+      - name: Compute next patch version
+        if: steps.detect.outputs.dependabot == 'true'
+        id: ver
+        shell: bash
+        env:
+          VERSION_FILE: ${{ inputs.version_file }}
+          VERSION_KEY: ${{ inputs.version_key }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$VERSION_FILE" ]; then
+            echo "ERROR: version_file not found: $VERSION_FILE" >&2
+            exit 1
+          fi
+
+          base=$(node -e "const fs=require('fs'); const p=process.env.VERSION_FILE; const k=process.env.VERSION_KEY; const obj=JSON.parse(fs.readFileSync(p,'utf8')); const v=String(obj[k]||'').trim(); if(!/^\d+\.\d+\.\d+$/.test(v)) { console.error('Invalid version: '+v); process.exit(1);} console.log(v);")
+          IFS='.' read -r major minor patch <<< "$base"
+          new_patch=$((patch+1))
+          next="$major.$minor.$new_patch"
+
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "release_branch=release/v$next" >> "$GITHUB_OUTPUT"
+          echo "Next version: $next"
+
+      - name: Skip if a release PR already exists
+        if: steps.detect.outputs.dependabot == 'true'
+        id: existing
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+        run: |
+          set -euo pipefail
+
+          # If any open PR from a release/v* branch into target exists, do not create a second one.
+          prs=$(gh pr list --repo "$GH_REPO" --state open --base "$TARGET_BRANCH" --json number,headRefName,url)
+          any=$(echo "$prs" | jq -r 'map(select(.headRefName | startswith("release/v"))) | length')
+
+          if [ "$any" -gt 0 ]; then
+            url=$(echo "$prs" | jq -r 'map(select(.headRefName | startswith("release/v"))) | .[0].url')
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+            echo "Existing open release PR found: $url"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+
+  create-release-pr:
+    name: Create release branch + PR (central reusable)
+    needs: [detect]
+    if: needs.detect.outputs.dependabot == 'true' && needs.detect.outputs.found != 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    uses: winccoa-tools-pack/.github/.github/workflows/reusable-create-release-branch.yml@main
+    secrets: inherit
+    with:
+      kind: release
+      version: ${{ needs.detect.outputs.next }}
+      base_branch: ${{ inputs.base_branch }}
+      target_branch: ${{ inputs.target_branch }}
+      draft: false
+      labels: "chore,release"
+      project_type: ${{ inputs.project_type }}
+      auto_release: ${{ inputs.auto_release }}
+
+  enable-auto-merge:
+    name: Enable auto-merge (optional)
+    needs: [detect, create-release-pr]
+    if: inputs.enable_auto_merge && needs.detect.outputs.dependabot == 'true' && needs.detect.outputs.found != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Enable auto-merge on PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_URL: ${{ needs.create-release-pr.outputs.pr_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PR_URL}" ]; then
+            echo "No PR URL available; cannot enable auto-merge." >&2
+            exit 0
+          fi
+
+          method="${{ inputs.auto_merge_method }}"
+          case "$method" in
+            squash|merge|rebase) ;;
+            *) echo "Invalid auto_merge_method: '$method'" >&2; exit 2;;
+          esac
+
+          gh pr merge --repo "$GH_REPO" --auto --"$method" "$PR_URL" || true
