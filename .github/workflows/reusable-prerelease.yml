@@ -59,10 +59,10 @@ on:
     outputs:
       version:
         description: "Computed prerelease version (x.y.z-<shortsha>)"
-        value: ${{ jobs.prerelease.outputs.version }}
+        value: ${{ jobs.meta.outputs.version }}
       tag:
         description: "Computed prerelease tag (v<version>)"
-        value: ${{ jobs.prerelease.outputs.tag }}
+        value: ${{ jobs.meta.outputs.tag }}
 
 permissions:
   contents: write
@@ -86,9 +86,9 @@ jobs:
     secrets: inherit
 
   # ────────────────────────────────────────────
-  # Build & publish prerelease
+  # Metadata (shared)
   # ────────────────────────────────────────────
-  prerelease:
+  meta:
     runs-on: ubuntu-latest
     needs: [versioning]
     outputs:
@@ -96,29 +96,6 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.target_branch != '' && inputs.target_branch || github.sha }}
-
-      - name: Use Node.js 20.x
-        uses: actions/setup-node@v6
-        with:
-          node-version: 20.x
-          cache: "npm"
-          # npm registry config needed for npm projects
-          registry-url: ${{ inputs.project_type == 'npm' && 'https://registry.npmjs.org' || '' }}
-          scope: ${{ inputs.project_type == 'npm' && '@winccoa-tools-pack' || '' }}
-
-      - name: Install dependencies
-        run: npm ci
-
-      # ── VS Code: install vsce ──
-      - name: Install vsce
-        if: ${{ inputs.project_type == 'vscode' }}
-        run: npm install -g @vscode/vsce
-
       - name: Set prerelease metadata
         id: meta
         shell: bash
@@ -128,16 +105,66 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      # ── npm: update package.json version ──
-      - name: Set package.json version
-        if: ${{ inputs.project_type == 'npm' }}
-        shell: bash
-        run: npm pkg set version="${{ steps.meta.outputs.version }}"
+  # ────────────────────────────────────────────
+  # VS Code prerelease (Linux + Windows)
+  # ────────────────────────────────────────────
+  vscode-package:
+    if: ${{ inputs.project_type == 'vscode' }}
+    needs: [meta]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: windows-latest
+            target: win32-x64
 
-      # ── Release body ──
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.target_branch != '' && inputs.target_branch || github.sha }}
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Package extension (VSIX)
+        run: vsce package --target ${{ matrix.target }}
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: "*.vsix"
+          retention-days: 14
+
+  vscode-release:
+    if: ${{ inputs.project_type == 'vscode' }}
+    needs: [versioning, meta, vscode-package]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+          path: dist
+
       - name: Build release body (vscode)
-        if: ${{ inputs.project_type == 'vscode' }}
-        id: body-vscode
+        id: body
         shell: bash
         run: |
           {
@@ -146,14 +173,77 @@ jobs:
             echo ""
             echo "### 🔍 Testing Notes"
             echo "- This is a **pre-release** build; download the attached VSIX and test locally"
+            echo "- Platform-specific packages: **linux-x64**, **win32-x64**"
             echo "- Source branch: ${{ inputs.target_branch }}"
             echo "- Report issues at: https://github.com/${{ github.repository }}/issues"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Create GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ format('🧪 Pre-Release {0}', needs.meta.outputs.tag) }}
+          target_commitish: ${{ inputs.target_branch != '' && inputs.target_branch || github.sha }}
+          body: ${{ steps.body.outputs.body }}
+          files: "dist/*.vsix"
+          draft: false
+          prerelease: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ────────────────────────────────────────────
+  # npm prerelease (single OS)
+  # ────────────────────────────────────────────
+  npm-prerelease:
+    if: ${{ inputs.project_type == 'npm' }}
+    needs: [versioning, meta]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.target_branch != '' && inputs.target_branch || github.sha }}
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: "npm"
+          registry-url: https://registry.npmjs.org
+          scope: "@winccoa-tools-pack"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set package.json version
+        shell: bash
+        run: npm pkg set version="${{ needs.meta.outputs.version }}"
+
+      - name: Build package
+        run: npm run build
+
+      - name: Create tarball (npm pack)
+        run: npm pack
+
+      - name: Upload npm tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ format('pre-release-{0}', github.sha) }}
+          path: "*.tgz"
+          retention-days: 14
+
+      - name: "Publish to npm (dist-tag: next)"
+        if: ${{ inputs.publish_to_npm && github.repository_owner == 'winccoa-tools-pack' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --tag next --access public --ignore-scripts
+
       - name: Build release body (npm)
-        if: ${{ inputs.project_type == 'npm' }}
-        id: body-npm
+        id: body
         shell: bash
         run: |
           PACKAGE_NAME=$(jq -r '.name' package.json)
@@ -163,59 +253,21 @@ jobs:
             echo ""
             echo "### 🔍 Testing Notes"
             echo "- This is a **pre-release** npm package published with dist-tag **next**"
-            echo "- Install: npm i $PACKAGE_NAME@${{ steps.meta.outputs.version }}"
+            echo "- Install: npm i $PACKAGE_NAME@${{ needs.meta.outputs.version }}"
             echo "- Or: npm i $PACKAGE_NAME@next"
             echo "- Source branch: ${{ inputs.target_branch }}"
             echo "- Report issues at: https://github.com/${{ github.repository }}/issues"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # ── VS Code: package VSIX ──
-      - name: Package extension (VSIX)
-        if: ${{ inputs.project_type == 'vscode' }}
-        run: vsce package
-
-      # ── npm: build & pack tarball ──
-      - name: Build package
-        if: ${{ inputs.project_type == 'npm' }}
-        run: npm run build
-
-      - name: Create tarball (npm pack)
-        if: ${{ inputs.project_type == 'npm' }}
-        run: npm pack
-
-      - name: "Publish to npm (dist-tag: next)"
-        if: ${{ inputs.project_type == 'npm' && inputs.publish_to_npm && github.repository_owner == 'winccoa-tools-pack' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --tag next --access public --ignore-scripts
-
-      # ── Upload artifact ──
-      - name: Upload VSIX artifact
-        if: ${{ inputs.project_type == 'vscode' }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ format('pre-release-{0}', github.sha) }}
-          path: "*.vsix"
-          retention-days: 14
-
-      - name: Upload npm tarball artifact
-        if: ${{ inputs.project_type == 'npm' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ format('pre-release-{0}', github.sha) }}
-          path: "*.tgz"
-          retention-days: 14
-
-      # ── GitHub prerelease ──
       - name: Create GitHub prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: ${{ format('🧪 Pre-Release {0}', steps.meta.outputs.tag) }}
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ format('🧪 Pre-Release {0}', needs.meta.outputs.tag) }}
           target_commitish: ${{ inputs.target_branch != '' && inputs.target_branch || github.sha }}
-          body: ${{ inputs.project_type == 'vscode' && steps.body-vscode.outputs.body || steps.body-npm.outputs.body }}
-          files: ${{ inputs.project_type == 'vscode' && '*.vsix' || '*.tgz' }}
+          body: ${{ steps.body.outputs.body }}
+          files: "*.tgz"
           draft: false
           prerelease: true
           generate_release_notes: true
