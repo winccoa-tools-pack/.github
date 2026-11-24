@@ -55,6 +55,16 @@ on:
         required: false
         default: "SQUASH"
         type: string
+      dry_run:
+        description: "Only print what would be merged; push nothing and create no PR"
+        required: false
+        default: false
+        type: boolean
+      notify_users:
+        description: "Comma-separated GitHub users to @mention when the upmerge PR has conflicts"
+        required: false
+        default: "mPokornyETM"
+        type: string
     secrets:
       REPO_ADMIN_TOKEN:
         description: "PAT with repo access — required so the push/PR triggers downstream workflows (CI/CD, Git Flow Validation). Falls back to GITHUB_TOKEN if empty."
@@ -145,15 +155,27 @@ jobs:
             echo "had_conflicts=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Dry-run summary
+        if: steps.prep.outputs.skip != 'true' && inputs.dry_run
+        shell: bash
+        run: |
+          {
+            echo "### Upmerge (dry run)"
+            echo ""
+            echo "Would merge \`${{ steps.prep.outputs.source_branch }}\` into \`${{ steps.prep.outputs.base_branch }}\` via \`${{ steps.prep.outputs.up_branch }}\`."
+            echo "Conflicts auto-resolved: ${{ steps.prep.outputs.had_conflicts }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Push upmerge branch
-        if: steps.prep.outputs.skip != 'true'
+        if: steps.prep.outputs.skip != 'true' && !inputs.dry_run
         shell: bash
         run: |
           set -euo pipefail
           git push --force-with-lease origin "${{ steps.prep.outputs.up_branch }}"
 
       - name: Create or update PR
-        if: steps.prep.outputs.skip != 'true'
+        id: pr
+        if: steps.prep.outputs.skip != 'true' && !inputs.dry_run
         uses: actions/github-script@v8
         env:
           REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
@@ -228,6 +250,8 @@ jobs:
               core.notice(`Created PR #${created.data.number} (${created.data.html_url}).`);
             }
 
+            core.setOutput('pr_number', String(prNumber));
+
             // Enable auto-merge so the PR merges once required status checks pass.
             if (!hadConflicts && autoMergeMethod) {
               try {
@@ -248,3 +272,22 @@ jobs:
                 core.warning(`Could not enable auto-merge on PR #${prNumber}: ${e.message}`);
               }
             }
+
+      - name: Ask for review when conflicts were auto-resolved
+        if: steps.pr.outputs.pr_number != '' && steps.prep.outputs.had_conflicts == 'true'
+        uses: actions/github-script@v8
+        env:
+          USERS: ${{ inputs.notify_users }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+        with:
+          # github.token on purpose: a comment written with the owner's PAT does not notify the owner.
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const users = process.env.USERS.split(',').map(s => s.trim().replace(/^@/, '')).filter(Boolean).map(u => '@' + u).join(' ');
+            const marker = '<!-- gitflow-upmerge:review-request -->';
+            const issue_number = Number(process.env.PR_NUMBER);
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            if (comments.some(c => c.body?.includes(marker))) return;
+            await github.rest.issues.createComment({ owner, repo, issue_number,
+              body: `${marker}\n${users} please take a time and review this upmerge (conflicts were auto-resolved).` });

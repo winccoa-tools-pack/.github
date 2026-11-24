@@ -1,0 +1,292 @@
+##
+# Reusable: Release Planner
+#
+# Looks at the commits that are on `base_branch` (develop) but not on
+# `target_branch` (main), derives the SemVer bump from Conventional Commit
+# titles (optionally raised by PR labels) and creates a release PR through
+# reusable-create-release-branch.yml.
+#
+# Rules:
+#   - nothing release-worthy ahead of main        -> do nothing
+#   - a release PR is already open                -> keep it (remind the owner)
+#   - new bump is more important than the open PR -> create the new release PR,
+#                                                    then abandon the old one
+#   - a hotfix PR is open                         -> do nothing
+#   - dry_run: only prints the plan to the job summary
+#
+# Release PRs must be merged with a merge commit (never squash).
+#
+# Caller:
+#   on:
+#     schedule: [{ cron: "0 20 * * 2" }]
+#     workflow_dispatch:
+#       inputs: { dry_run: { type: boolean, default: true } }
+#   jobs:
+#     plan:
+#       permissions: { contents: write, pull-requests: write, issues: write }
+#       uses: winccoa-tools-pack/.github/.github/workflows/reusable-release-planner.yml@main
+#       secrets: inherit
+#       with:
+#         dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+##
+
+name: "Reusable: Release Planner"
+
+on:
+  workflow_call:
+    inputs:
+      base_branch:
+        description: "Branch with the unreleased changes"
+        type: string
+        default: develop
+      target_branch:
+        description: "Stable branch to release into"
+        type: string
+        default: main
+      project_type:
+        description: "'npm' or 'vscode'"
+        type: string
+        default: npm
+      dry_run:
+        description: "Only print the plan, change nothing"
+        type: boolean
+        default: false
+      ignore_types:
+        description: "Conventional-commit types that never trigger a release"
+        type: string
+        default: "docs,style,test,ci,chore"
+      use_pr_labels:
+        description: "Let PR labels raise the bump"
+        type: boolean
+        default: true
+      major_label:
+        type: string
+        default: breaking
+      minor_label:
+        type: string
+        default: enhancement
+      auto_release_bumps:
+        description: "Bumps that get the auto-release countdown label, e.g. 'patch,minor'. Empty = never."
+        type: string
+        default: ""
+      notify_users:
+        description: "Comma-separated GitHub users to @mention on the release PR"
+        type: string
+        default: mPokornyETM
+      remind_after_days:
+        description: "Repeat the review request on a still-open release PR after N days (0 = never)"
+        type: number
+        default: 7
+    secrets:
+      REPO_ADMIN_TOKEN:
+        description: "PAT so the created PR triggers the required checks. Falls back to GITHUB_TOKEN."
+        required: false
+    outputs:
+      action:
+        description: "none | create | supersede | keep-existing | blocked-by-hotfix"
+        value: ${{ jobs.plan.outputs.action }}
+      next_version:
+        value: ${{ jobs.plan.outputs.next }}
+      bump:
+        value: ${{ jobs.plan.outputs.bump }}
+
+permissions: {}
+
+concurrency:
+  group: release-planner-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      action: ${{ steps.plan.outputs.action }}
+      next: ${{ steps.plan.outputs.next }}
+      bump: ${{ steps.plan.outputs.bump }}
+      auto: ${{ steps.plan.outputs.auto }}
+      supersedes: ${{ steps.plan.outputs.supersedes }}
+      existing_pr: ${{ steps.plan.outputs.existing_pr }}
+    steps:
+      - name: Compare, classify, decide
+        id: plan
+        uses: actions/github-script@v9
+        env:
+          BASE: ${{ inputs.base_branch }}
+          TARGET: ${{ inputs.target_branch }}
+          IGNORE_TYPES: ${{ inputs.ignore_types }}
+          USE_LABELS: ${{ inputs.use_pr_labels }}
+          MAJOR_LABEL: ${{ inputs.major_label }}
+          MINOR_LABEL: ${{ inputs.minor_label }}
+          AUTO_BUMPS: ${{ inputs.auto_release_bumps }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        with:
+          github-token: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const e = process.env;
+            const ignore = new Set(e.IGNORE_TYPES.split(',').map(s => s.trim()).filter(Boolean));
+            const rank = { none: 0, patch: 1, minor: 2, major: 3 };
+
+            const file = await github.rest.repos.getContent({ owner, repo, path: 'package.json', ref: e.TARGET });
+            const current = JSON.parse(Buffer.from(file.data.content, 'base64').toString()).version;
+            const cur = (/^(\d+)\.(\d+)\.(\d+)$/.exec(current) || []).slice(1).map(Number);
+            if (cur.length !== 3) { core.setFailed(`Invalid version on ${e.TARGET}: ${current}`); return; }
+
+            const commits = [];
+            for (let page = 1; ; page++) {
+              const r = await github.rest.repos.compareCommitsWithBasehead({
+                owner, repo, basehead: `${e.TARGET}...${e.BASE}`, per_page: 100, page });
+              commits.push(...r.data.commits);
+              if (r.data.commits.length < 100) break;
+            }
+
+            const noise = s => /^Merge /.test(s) || /^chore\(release\):/.test(s) || /^chore: upmerge/.test(s);
+            let bump = 'none';
+            const rows = [];
+            for (const c of commits) {
+              const msg = c.commit.message;
+              const subject = msg.split('\n')[0];
+              if (noise(subject)) continue;
+              const t = /^(\w+)(\([^)]*\))?(!)?:\s/.exec(subject);
+              let b = 'none';
+              if (t?.[3] || /^BREAKING[ -]CHANGE:/m.test(msg)) b = 'major';
+              else if (t?.[1] === 'feat') b = 'minor';
+              else if (!t || !ignore.has(t[1])) b = 'patch';
+              if (b !== 'none' && e.USE_LABELS === 'true') {
+                const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({ owner, repo, commit_sha: c.sha });
+                const labels = prs.data.flatMap(p => p.labels.map(l => l.name));
+                if (labels.includes(e.MAJOR_LABEL)) b = 'major';
+                else if (labels.includes(e.MINOR_LABEL) && rank[b] < rank.minor) b = 'minor';
+              }
+              rows.push(`| ${b} | ${subject.replace(/\|/g, '\\|')} |`);
+              if (rank[b] > rank[bump]) bump = b;
+            }
+
+            // 0.x: breaking -> minor, feat -> patch (1.0.0 stays a deliberate decision)
+            const effective = cur[0] === 0
+              ? { none: 'none', patch: 'patch', minor: 'patch', major: 'minor' }[bump] : bump;
+            const [ma, mi, pa] = cur;
+            const next = effective === 'major' ? `${ma + 1}.0.0`
+              : effective === 'minor' ? `${ma}.${mi + 1}.0` : `${ma}.${mi}.${pa + 1}`;
+
+            const open = await github.paginate(github.rest.pulls.list,
+              { owner, repo, state: 'open', base: e.TARGET, per_page: 100 });
+            const rel = open.filter(p => /^release\/v\d+\.\d+\.\d+$/.test(p.head.ref));
+            const hot = open.filter(p => /^hotfix\/v/.test(p.head.ref));
+            const bumpOf = p => {
+              const v = p.head.ref.replace('release/v', '').split('.').map(Number);
+              return v[0] > cur[0] ? 'major' : v[1] > cur[1] ? 'minor' : 'patch';
+            };
+
+            let action; let supersedes = [];
+            if (effective === 'none') action = 'none';
+            else if (hot.length) action = 'blocked-by-hotfix';
+            else if (rel.length) {
+              const highest = Math.max(...rel.map(p => rank[bumpOf(p)]));
+              if (rank[effective] > highest) { action = 'supersede'; supersedes = rel.map(p => p.number); }
+              else action = 'keep-existing';
+            } else action = 'create';
+
+            const auto = e.AUTO_BUMPS.split(',').map(s => s.trim()).filter(Boolean).includes(effective);
+            core.setOutput('action', action);
+            core.setOutput('next', next);
+            core.setOutput('bump', effective);
+            core.setOutput('auto', String(auto));
+            core.setOutput('supersedes', JSON.stringify(supersedes));
+            core.setOutput('existing_pr', rel[0]?.number ?? '');
+
+            await core.summary
+              .addHeading(`Release planner${e.DRY_RUN === 'true' ? ' (dry run)' : ''}`)
+              .addRaw(`\n- Current version on \`${e.TARGET}\`: **${current}**\n` +
+                      `- Commits ahead (\`${e.BASE}\`): **${commits.length}**\n` +
+                      `- Bump: **${effective}** -> next **${next}**\n` +
+                      `- Open release PRs: ${rel.map(p => '#' + p.number).join(', ') || 'none'}\n` +
+                      `- Decision: **${action}**${supersedes.length ? ' (abandons ' + supersedes.map(n => '#' + n).join(', ') + ')' : ''}\n\n` +
+                      `| Bump | Commit |\n|---|---|\n${rows.join('\n')}\n`)
+              .write();
+
+  create:
+    name: Create release branch + PR
+    needs: plan
+    if: ${{ !inputs.dry_run && (needs.plan.outputs.action == 'create' || needs.plan.outputs.action == 'supersede') }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    uses: winccoa-tools-pack/.github/.github/workflows/reusable-create-release-branch.yml@main
+    secrets: inherit
+    with:
+      kind: release
+      version: ${{ needs.plan.outputs.next }}
+      base_branch: ${{ inputs.base_branch }}
+      target_branch: ${{ inputs.target_branch }}
+      draft: false
+      labels: "chore,release"
+      project_type: ${{ inputs.project_type }}
+      auto_release: ${{ needs.plan.outputs.auto == 'true' }}
+
+  abandon:
+    name: Abandon superseded release PRs
+    needs: [plan, create]
+    if: ${{ needs.create.result == 'success' && needs.plan.outputs.action == 'supersede' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v9
+        env:
+          SUPERSEDES: ${{ needs.plan.outputs.supersedes }}
+          NEXT: ${{ needs.plan.outputs.next }}
+        with:
+          github-token: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            for (const number of JSON.parse(process.env.SUPERSEDES)) {
+              const pr = await github.rest.pulls.get({ owner, repo, pull_number: number });
+              await github.rest.issues.createComment({ owner, repo, issue_number: number,
+                body: `Superseded by v${process.env.NEXT} (contains a more important change). Closing.` });
+              await github.rest.pulls.update({ owner, repo, pull_number: number, state: 'closed' });
+              await github.rest.git.deleteRef({ owner, repo, ref: `heads/${pr.data.head.ref}` });
+            }
+
+  notify:
+    name: Ask for review
+    needs: [plan, create]
+    if: ${{ always() && !inputs.dry_run && (needs.create.result == 'success' || needs.plan.outputs.action == 'keep-existing') }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/github-script@v9
+        env:
+          USERS: ${{ inputs.notify_users }}
+          REMIND_DAYS: ${{ inputs.remind_after_days }}
+          CREATED_URL: ${{ needs.create.outputs.pr_url }}
+          EXISTING: ${{ needs.plan.outputs.existing_pr }}
+        with:
+          # github.token on purpose: a comment written with the owner's PAT does not notify the owner.
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const e = process.env;
+            const users = e.USERS.split(',').map(s => s.trim().replace(/^@/, '')).filter(Boolean).map(u => '@' + u).join(' ');
+            const marker = '<!-- release-planner:review-request -->';
+            const created = !!e.CREATED_URL;
+            const number = Number(created ? e.CREATED_URL.split('/').pop() : e.EXISTING);
+            if (!number) return;
+            if (!created) {
+              const days = Number(e.REMIND_DAYS || 0);
+              if (!days) return;
+              const comments = await github.paginate(github.rest.issues.listComments,
+                { owner, repo, issue_number: number, per_page: 100 });
+              const last = comments.filter(c => c.body?.includes(marker)).pop();
+              if (last && Date.now() - Date.parse(last.created_at) < days * 864e5) return;
+            }
+            await github.rest.issues.createComment({ owner, repo, issue_number: number,
+              body: `${marker}\n${users} please take a time and review this release.` });
