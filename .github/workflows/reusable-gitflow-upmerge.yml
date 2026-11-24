@@ -210,7 +210,7 @@ jobs:
                     'git push',
                     '```',
                   ].join('\n')
-                : 'No merge conflicts detected — auto-merge enabled.',
+                : 'No merge conflicts detected.',
             ].join('\n');
 
             // Find existing open PR from head to base
@@ -261,24 +261,26 @@ jobs:
                       pullRequest(number: $number) { id }
                     }
                   }`, { owner, repo, number: prNumber });
+                // "method" is reserved by @octokit/graphql and cannot be a variable name.
                 await github.graphql(`
-                  mutation($prId: ID!, $method: PullRequestMergeMethod!) {
-                    enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: $method }) {
+                  mutation($prId: ID!, $mergeMethod: PullRequestMergeMethod!) {
+                    enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: $mergeMethod }) {
                       clientMutationId
                     }
-                  }`, { prId: repository.pullRequest.id, method: autoMergeMethod });
+                  }`, { prId: repository.pullRequest.id, mergeMethod: autoMergeMethod });
                 core.notice(`Enabled auto-merge (${autoMergeMethod}) on PR #${prNumber}`);
               } catch (e) {
                 core.warning(`Could not enable auto-merge on PR #${prNumber}: ${e.message}`);
               }
             }
 
-      - name: Ask for review when conflicts were auto-resolved
-        if: steps.pr.outputs.pr_number != '' && steps.prep.outputs.had_conflicts == 'true'
+      - name: Ask for review
+        if: steps.pr.outputs.pr_number != ''
         uses: actions/github-script@v8
         env:
           USERS: ${{ inputs.notify_users }}
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          HAD_CONFLICTS: ${{ steps.prep.outputs.had_conflicts }}
         with:
           # github.token on purpose: a comment written with the owner's PAT does not notify the owner.
           github-token: ${{ github.token }}
@@ -290,4 +292,5 @@ jobs:
             const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
             if (comments.some(c => c.body?.includes(marker))) return;
             await github.rest.issues.createComment({ owner, repo, issue_number,
-              body: `${marker}\n${users} please take a time and review this upmerge (conflicts were auto-resolved).` });
+              body: `${marker}\n${users} please take a time and review this upmerge` +
+                (process.env.HAD_CONFLICTS === 'true' ? ' (conflicts were auto-resolved).' : '.') });
