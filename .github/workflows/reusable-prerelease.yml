@@ -184,17 +184,17 @@ jobs:
         if: ${{ inputs.project_type == 'npm' }}
         run: npm pack
 
+      # The secrets context is not available in `if:`, so the token is checked in the script.
       - name: "Publish to npm (dist-tag: next)"
-        if: ${{ inputs.project_type == 'npm' && inputs.publish_to_npm && github.repository_owner == 'winccoa-tools-pack' && secrets.NPM_TOKEN != '' }}
+        if: ${{ inputs.project_type == 'npm' && inputs.publish_to_npm && github.repository_owner == 'winccoa-tools-pack' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --tag next --access public --ignore-scripts
-
-      - name: "Skip npm publish (no token available)"
-        if: ${{ inputs.project_type == 'npm' && inputs.publish_to_npm && github.repository_owner == 'winccoa-tools-pack' && secrets.NPM_TOKEN == '' }}
         run: |
-          echo "Skipping npm publish: NPM_TOKEN is not available in this workflow run (e.g. Dependabot PR)."
-
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "Skipping npm publish: NPM_TOKEN is not available in this workflow run (e.g. Dependabot PR)."
+            exit 0
+          fi
+          npm publish --tag next --access public --ignore-scripts
       # -- Upload artifact --
       - name: Upload VSIX artifact
         if: ${{ inputs.project_type == 'vscode' }}
