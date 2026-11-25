@@ -279,7 +279,7 @@ jobs:
       # ─────────────────────────────────────
       - name: Create GitHub release (vscode)
         if: ${{ inputs.project_type == 'vscode' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.tag.outputs.tag }}
           name: ${{ format('Release {0}', needs.tag.outputs.tag) }}
@@ -298,7 +298,7 @@ jobs:
 
       - name: Create GitHub release (npm)
         if: ${{ inputs.project_type == 'npm' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.tag.outputs.tag }}
           name: ${{ format('Release {0}', needs.tag.outputs.tag) }}
