@@ -1,0 +1,40 @@
+name: "🚀 Feature request"
+description: Request a feature or an improvement in any repository of the WinCC OA Tools Pack
+title: "[Feature]: "
+labels: ["triage", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the central place for feature requests for all repositories of the organization.
+        Before submitting, please review the triage process:
+        https://github.com/winccoa-tools-pack/.github/blob/main/docs/triage-guide.md
+
+  - type: input
+    id: repository
+    attributes:
+      label: Repository or tool
+      description: Which repository, package or extension should get the feature? Write "new" if it is a new tool.
+      placeholder: "Example: npm-winccoa-core or vscode-winccoa-logviewer"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What do you want to achieve, and what is hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How should it work? Sketches, examples and API ideas are welcome.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other solutions or workarounds you considered.
