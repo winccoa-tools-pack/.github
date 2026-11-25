@@ -191,7 +191,8 @@ jobs:
               else action = 'keep-existing';
             } else action = 'create';
 
-            const auto = e.AUTO_BUMPS.split(',').map(s => s.trim()).filter(Boolean).includes(effective);
+            // Decide on the raw bump: on 0.x a breaking change maps to a minor version but must never be released automatically.
+            const auto = e.AUTO_BUMPS.split(',').map(s => s.trim()).filter(Boolean).includes(bump);
             core.setOutput('action', action);
             core.setOutput('next', next);
             core.setOutput('bump', effective);
