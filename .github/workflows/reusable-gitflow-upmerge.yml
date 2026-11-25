@@ -74,13 +74,13 @@ on:
         type: string
     secrets:
       BOT_APP_ID:
-        description: "ID of the winccoa-tools-pack-bot GitHub App. With BOT_PRIVATE_KEY it is used instead of REPO_ADMIN_TOKEN, so the push/PR is authored by the bot."
+        description: "ID of the winccoa-tools-pack-bot GitHub App. With BOT_PRIVATE_KEY it is the fallback when REPO_ADMIN_TOKEN is empty. Pushes by the bot app do not start workflows (org .github issue 121)."
         required: false
       BOT_PRIVATE_KEY:
         description: "Private key of the winccoa-tools-pack-bot GitHub App."
         required: false
       REPO_ADMIN_TOKEN:
-        description: "Fallback PAT with repo access, used only when the bot token cannot be created. Falls back to GITHUB_TOKEN if empty."
+        description: "PAT with repo access. Preferred, so that the push/PR starts workflows. Falls back to the bot token, then to GITHUB_TOKEN if empty."
         required: false
 permissions: {}
 
@@ -108,12 +108,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          # A bot/app token (or the PAT fallback) is required so that the push /
+          # A user PAT (REPO_ADMIN_TOKEN) or the bot token is required so that the push /
           # PR-create fires pull_request events, which in turn trigger the
           # required status checks (CI/CD, PR Labels, Git Flow Validation).
           # The default GITHUB_TOKEN deliberately suppresses those events to
           # prevent recursive loops.
-          token: ${{ steps.bot.outputs.token || secrets.REPO_ADMIN_TOKEN || github.token }}
+          token: ${{ secrets.REPO_ADMIN_TOKEN || steps.bot.outputs.token || github.token }}
 
       - name: Configure git identity
         shell: bash
@@ -203,7 +203,7 @@ jobs:
           AUTO_MERGE_METHOD: ${{ inputs.auto_merge_method }}
           COUNTDOWN_LABEL: ${{ inputs.countdown_label }}
         with:
-          github-token: ${{ steps.bot.outputs.token || secrets.REPO_ADMIN_TOKEN || github.token }}
+          github-token: ${{ secrets.REPO_ADMIN_TOKEN || steps.bot.outputs.token || github.token }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
