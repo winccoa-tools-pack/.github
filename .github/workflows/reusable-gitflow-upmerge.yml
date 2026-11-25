@@ -73,10 +73,15 @@ on:
         default: "mPokornyETM"
         type: string
     secrets:
-      REPO_ADMIN_TOKEN:
-        description: "PAT with repo access — required so the push/PR triggers downstream workflows (CI/CD, Git Flow Validation). Falls back to GITHUB_TOKEN if empty."
+      BOT_APP_ID:
+        description: "ID of the winccoa-tools-pack-bot GitHub App. With BOT_PRIVATE_KEY it is used instead of REPO_ADMIN_TOKEN, so the push/PR is authored by the bot."
         required: false
-
+      BOT_PRIVATE_KEY:
+        description: "Private key of the winccoa-tools-pack-bot GitHub App."
+        required: false
+      REPO_ADMIN_TOKEN:
+        description: "Fallback PAT with repo access, used only when the bot token cannot be created. Falls back to GITHUB_TOKEN if empty."
+        required: false
 permissions: {}
 
 concurrency:
@@ -91,15 +96,24 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - name: Create bot token
+        id: bot
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          # A PAT is required so that the push / PR-create fires pull_request
-          # events, which in turn trigger the required status checks (CI/CD,
-          # PR Labels, Git Flow Validation).  The default GITHUB_TOKEN
-          # deliberately suppresses those events to prevent recursive loops.
-          token: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          # A bot/app token (or the PAT fallback) is required so that the push /
+          # PR-create fires pull_request events, which in turn trigger the
+          # required status checks (CI/CD, PR Labels, Git Flow Validation).
+          # The default GITHUB_TOKEN deliberately suppresses those events to
+          # prevent recursive loops.
+          token: ${{ steps.bot.outputs.token || secrets.REPO_ADMIN_TOKEN || github.token }}
 
       - name: Configure git identity
         shell: bash
@@ -189,7 +203,7 @@ jobs:
           AUTO_MERGE_METHOD: ${{ inputs.auto_merge_method }}
           COUNTDOWN_LABEL: ${{ inputs.countdown_label }}
         with:
-          github-token: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
+          github-token: ${{ steps.bot.outputs.token || secrets.REPO_ADMIN_TOKEN || github.token }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
