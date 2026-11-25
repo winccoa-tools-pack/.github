@@ -5,6 +5,14 @@ contact_links:
     url: https://github.com/winccoa-tools-pack/.github/discussions
     about: Start a discussion for questions, brainstorming, or open conversation.
 
+  - name: Documentation
+    url: https://winccoa-tools-pack.github.io/
+    about: Cookbooks, tools, AI skills and the vision of the WinCC OA Tools Pack.
+
+  - name: Live activity
+    url: https://winccoa-tools-pack.github.io/activity.html
+    about: Latest commits and pull requests, all open pull requests and open issues per repository.
+
 issue_templates:
   - name: 💡 VS Code Extension Idea
     description: Propose a new VS Code extension for the WinCC OA ecosystem
