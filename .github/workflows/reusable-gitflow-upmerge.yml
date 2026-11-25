@@ -9,7 +9,9 @@
 #   - Dedicated upmerge branch (feature/upmerge-main-to-develop)
 #   - Auto-resolves conflicts in favour of main (-X theirs)
 #   - Creates PR as draft when structural conflicts remain
-#   - Enables auto-merge (squash) so the PR merges once CI passes
+#   - Enables auto-merge (merge commit by default) so the PR merges once CI passes
+#   - Adds the auto-approve countdown label to conflict-free PRs, so the PR is
+#     approved and merged without a manual review after the countdown
 #   - Detailed conflict resolution instructions in PR body
 #   - workflow_dispatch trigger for manual re-runs
 #
@@ -51,9 +53,14 @@ on:
         default: "feature/upmerge-main-to-develop"
         type: string
       auto_merge_method:
-        description: "Auto-merge method to enable on the PR (SQUASH, MERGE, REBASE, or empty to disable)"
+        description: "Auto-merge method to enable on the PR (MERGE keeps the history of main; SQUASH, REBASE, or empty to disable)"
         required: false
-        default: "SQUASH"
+        default: "MERGE"
+        type: string
+      countdown_label:
+        description: "Label that starts the auto-approve countdown (auto-approve-owner-prs.yml) on a conflict-free upmerge PR. Empty = no label"
+        required: false
+        default: "merge-in-3-days-without-review"
         type: string
       dry_run:
         description: "Only print what would be merged; push nothing and create no PR"
@@ -180,6 +187,7 @@ jobs:
         env:
           REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
           AUTO_MERGE_METHOD: ${{ inputs.auto_merge_method }}
+          COUNTDOWN_LABEL: ${{ inputs.countdown_label }}
         with:
           github-token: ${{ secrets.REPO_ADMIN_TOKEN != '' && secrets.REPO_ADMIN_TOKEN || github.token }}
           script: |
@@ -224,9 +232,11 @@ jobs:
             });
 
             let prNumber;
+            let prLabels = [];
             if (prs.data.length > 0) {
               const pr = prs.data[0];
               prNumber = pr.number;
+              prLabels = pr.labels.map(l => l.name);
               await github.rest.pulls.update({
                 owner,
                 repo,
@@ -251,6 +261,14 @@ jobs:
             }
 
             core.setOutput('pr_number', String(prNumber));
+
+            // Start the auto-approve countdown once; re-adding it on every run would restart the countdown.
+            const countdownLabel = process.env.COUNTDOWN_LABEL || '';
+            const hasCountdown = prLabels.some(n => /^merge-in-\d+-days?-without-review$|^merged-without-review$/.test(n));
+            if (!hadConflicts && countdownLabel && !hasCountdown) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: prNumber, labels: [countdownLabel] });
+              core.notice(`Added countdown label '${countdownLabel}' to PR #${prNumber}`);
+            }
 
             // Enable auto-merge so the PR merges once required status checks pass.
             if (!hadConflicts && autoMergeMethod) {
@@ -281,6 +299,7 @@ jobs:
           USERS: ${{ inputs.notify_users }}
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
           HAD_CONFLICTS: ${{ steps.prep.outputs.had_conflicts }}
+          COUNTDOWN_LABEL: ${{ inputs.countdown_label }}
         with:
           # github.token on purpose: a comment written with the owner's PAT does not notify the owner.
           github-token: ${{ github.token }}
@@ -293,4 +312,6 @@ jobs:
             if (comments.some(c => c.body?.includes(marker))) return;
             await github.rest.issues.createComment({ owner, repo, issue_number,
               body: `${marker}\n${users} please take a time and review this upmerge` +
-                (process.env.HAD_CONFLICTS === 'true' ? ' (conflicts were auto-resolved).' : '.') });
+                (process.env.HAD_CONFLICTS === 'true'
+                  ? ' (conflicts were auto-resolved).'
+                  : '.' + (process.env.COUNTDOWN_LABEL ? ' Without a review it is approved and merged when the countdown runs out.' : '')) });
